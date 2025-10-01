@@ -12,6 +12,8 @@
 #include <stdbool.h>
 #include <limits.h>
 
+#define PRINTERR(...) fprintf(stderr, __VA_ARGS__)
+
 // gonna move these enum and struct definitions into a header file
 // and the base datatype of enumerations are implementation-defined!!!
 enum InstrType {
@@ -136,8 +138,8 @@ static char *get_wordp(int *word_len)	// prob need to increment to skip delimite
 
 	while (!is_whitespace(*srcp_cur) && *srcp_cur != ';') {
 		if (*srcp_cur == '\0') {
-			fprintf(stderr,
-			  "Unterminated word beginning at pos %d\n", debug_pos);
+			PRINTERR("Unterminated word beginning at pos %d\n",
+			  debug_pos);
 			exit(1);
 		}
 		srcp_cur++;
@@ -162,7 +164,7 @@ static int8_t str_to_int8_t_with_len(char *str, int len)
 {
 	bool is_negative = *str == '-';	// unary minus
 	if (len > ((is_negative) ? 4 : 3))	// Ex: 2552,	takes more than 8 bits, len + 1 to account for sign
-		fprintf(stderr,
+		PRINTERR(
 		  "8-bit integer has %d digits which exceeds the limit of 3"
 		  " at pos %d\n", len, (int) (str - srcp_start));
 		
@@ -173,11 +175,11 @@ static int8_t str_to_int8_t_with_len(char *str, int len)
 		(*(str + 1) - '0') * 10 +
 		(*(str + 2) - '0');
 	if (sum > INT8_MAX)
-		fprintf(stderr,
+		PRINTERR(
 		  "8-bit integer has value of %d which exceeds the limit of 127"
 		  " at pos %d\n", sum, (int) (str - srcp_start));
 	else if (sum < INT8_MIN)
-		fprintf(stderr,
+		PRINTERR(
 		  "8-bit integer has value of %d which exceeds the limit of -128"
 		  " at pos %d\n", sum, (int) (str - srcp_start));
 	return (int8_t) sum;
@@ -197,7 +199,7 @@ static void set_instr_type_info(struct Instr *instr,
 			return;
 		}
 	}
-	fprintf(stderr, "Invalid instruction at pos %d\n",
+	PRINTERR( "Invalid instruction at pos %d\n",
 	  (int) (instr_name - srcp_start));
 	exit(1);
 }
@@ -236,7 +238,7 @@ static inline void end_statement(int debug_statement_pos)
 	while (is_whitespace(*srcp_cur))	// consume trailing whitespace
 		srcp_cur++;
 	if (*srcp_cur != ';')
-		fprintf(stderr,
+		PRINTERR(
 		  "Expected semicolon ';' to end"
 		  " statement starting at pos %d\n",
 		  debug_statement_pos);
@@ -254,7 +256,7 @@ static void parse_src(char src[], int src_len,
 		char *instr_name = get_wordp(&instr_name_len);
 
 		if (instr_name_len == 0) {
-			fprintf(stderr,
+			PRINTERR(
 			  "Expected instruction at pos %d\n",
 			  (int) (srcp_cur - srcp_start));
 			  exit(1);
@@ -293,14 +295,14 @@ static void parse_src(char src[], int src_len,
 			char *arg2 = get_wordp(&arg2_len);
 
 			if (arg1_len == 0) {
-				fprintf(stderr,
+				PRINTERR(
 				  "Expected 2 args for instruction starting at pos %d\n",
 				  statement_start_pos);
 				  exit(1);
 			}
 
 			if (arg2_len == 0) {
-				fprintf(stderr,
+				PRINTERR(
 				  "Expected arg 2 for instruction starting at pos %d\n",
 				  statement_start_pos);
 				  exit(1);
@@ -318,7 +320,7 @@ static void parse_src(char src[], int src_len,
 		}
 		else {
 			if (arg1_len == 0) {
-				fprintf(stderr,
+				PRINTERR(
 				  "Expected arg for instruction starting at pos %d\n",
 				  statement_start_pos);
 				  exit(1);
