@@ -12,7 +12,7 @@
 #include <stdbool.h>
 #include <limits.h>
 
-#define PRINTERR(...) fprintf(stderr, __VA_ARGS__)
+#define ERREXIT(...) fprintf(stderr, __VA_ARGS__), exit(0)
 
 // gonna move these enum and struct definitions into a header file
 // and the base datatype of enumerations are implementation-defined!!!
@@ -38,14 +38,14 @@ enum Reg {
 	R2,
 	R3,
 	R4,
-	RSP,
 	RBP,
+	RSP,
 	RIP
 };
 
 enum ArgType {
 	REG,
-	LITERAL
+	INT8
 };
 
 struct INSTR_MATCH_INFO {
@@ -61,18 +61,17 @@ struct REG_MATCH_INFO {
 	enum Reg enum_type;
 };
 
-// thought of using unions, one member for 1 arg, another for 2 args
-struct Instr {	// change
+struct Instr {
 	enum InstrType type;
 	enum ArgType arg1_type;
 	enum ArgType arg2_type;
 	union {
 		enum Reg reg;
-		int8_t value;
+		int8_t int8;
 	} arg1;
 	union {
 		enum Reg reg;
-		int8_t value;
+		int8_t int8;
 	} arg2;
 };
 
@@ -80,7 +79,7 @@ struct Instr {	// change
 static const struct INSTR_MATCH_INFO INSTRS[] = {	// ragged array
 	{.name = "INC", .name_len = 3, .enum_type = INC, .uses_two_args = false},
 	{.name = "DEC", .name_len = 3, .enum_type = DEC, .uses_two_args = false},
-	{.name = "PUSH", .name_len = 3, .enum_type = PUSH, .uses_two_args = false},
+	{.name = "PUSH", .name_len = 4, .enum_type = PUSH, .uses_two_args = false},
 	{.name = "POP", .name_len = 3, .enum_type = POP, .uses_two_args = false},
 	{.name = "MOV", .name_len = 3, .enum_type = MOV, .uses_two_args = true},
 	{.name = "LDA", .name_len = 3, .enum_type = LDA, .uses_two_args = true},
@@ -118,11 +117,6 @@ static bool strcmp_with_lens(const char *str1, const char *str2,
 	return i == str1_len;
 }
 
-static inline int get_src_pos(void)
-{
-	return (int) (srcp_cur - srcp_start);	// cast ptrdiff to int, lowkey doubt the diff will exceed range of a signed int
-}
-
 static inline bool is_whitespace(char c)
 {
 	return (c == ' ' || c == '\n' || c == '\t'
@@ -138,9 +132,8 @@ static char *get_wordp(int *word_len)	// prob need to increment to skip delimite
 
 	while (!is_whitespace(*srcp_cur) && *srcp_cur != ';') {
 		if (*srcp_cur == '\0') {
-			PRINTERR("Unterminated word beginning at pos %d\n",
+			ERREXIT("Unterminated word beginning at pos %d\n",
 			  debug_pos);
-			exit(1);
 		}
 		srcp_cur++;
 	}
@@ -152,9 +145,8 @@ static char *get_wordp(int *word_len)	// prob need to increment to skip delimite
 static inline bool is_str_int_with_len(char *str, int len)
 {
 	char *end = str + len;
-	str++;
-	if (*str != '-' || (*str < '0' || *str > '9'))	// account for negative sign
-		return false;
+	if (*str == '-')	// account for negative sign
+		str++;
 	while (str < end && (*str >= '0' && *str <= '9'))
 		str++;
 	return str == end;
@@ -164,22 +156,24 @@ static int8_t str_to_int8_t_with_len(char *str, int len)
 {
 	bool is_negative = *str == '-';	// unary minus
 	if (len > ((is_negative) ? 4 : 3))	// Ex: 2552,	takes more than 8 bits, len + 1 to account for sign
-		PRINTERR(
-		  "8-bit integer has %d digits which exceeds the limit of 3"
+		ERREXIT("8-bit integer has %d digits which exceeds the limit of 3"
 		  " at pos %d\n", len, (int) (str - srcp_start));
-		
+	int exp = 1;
 	if (is_negative)
-		str++;
+		str++, len--, exp = -1;
 	int sum = 0;
-	sum = (*str - '0') * 100 +
-		(*(str + 1) - '0') * 10 +
-		(*(str + 2) - '0');
+	char *int_start = str + len - 1;
+	while (int_start >= str) {
+		printf("AAA: %c\n", *int_start);
+		sum += (*int_start - '0') * exp;
+		int_start--, exp *= 10;
+	}
 	if (sum > INT8_MAX)
-		PRINTERR(
+		ERREXIT(
 		  "8-bit integer has value of %d which exceeds the limit of 127"
 		  " at pos %d\n", sum, (int) (str - srcp_start));
 	else if (sum < INT8_MIN)
-		PRINTERR(
+		ERREXIT(
 		  "8-bit integer has value of %d which exceeds the limit of -128"
 		  " at pos %d\n", sum, (int) (str - srcp_start));
 	return (int8_t) sum;
@@ -199,38 +193,48 @@ static void set_instr_type_info(struct Instr *instr,
 			return;
 		}
 	}
-	PRINTERR( "Invalid instruction at pos %d\n",
+	ERREXIT( "Invalid instruction at pos %d\n",
 	  (int) (instr_name - srcp_start));
-	exit(1);
 }
 
 static void set_instr_arg_info(struct Instr *instr,
   int which_arg, char *arg, int arg_len, bool reg_only)
 {
-	if (!reg_only)
+	if (!reg_only) {
 		if (is_str_int_with_len(arg, arg_len)) {
-			
-			return;			
-		}
-	
-	if (reg_only) {
-		static const int REGS_COUNT = (int)
-		  sizeof REGS / sizeof *REGS;
-
-		(which_arg == 1) ?
-		(instr->arg1_type = REG) :
-		(instr->arg2_type = REG);
-		for (int i = 0; i < REGS_COUNT; i++) {
-			if (strcmp_with_lens(arg, REGS[i].name,
-			  arg_len, REGS[i].name_len))
-				(which_arg == 1) ?
-				(instr->arg1.reg = REGS[i].enum_type) :
-				(instr->arg2.reg = REGS[i].enum_type);
+			int8_t arg_value = str_to_int8_t_with_len(arg, arg_len);
+			if (which_arg == 1) {
+				instr->arg1_type = INT8;
+				instr->arg1.int8 = arg_value;
+			}
+			else {
+				instr->arg2_type = INT8;
+				instr->arg2.int8 = arg_value;
+			}
+			return;	
 		}
 	}
-	else {
+	static const int REGS_COUNT = (int) (sizeof REGS / sizeof *REGS);
 
+	for (int i = 0; i < REGS_COUNT; i++) {
+		if (strcmp_with_lens(arg, REGS[i].name,
+		  arg_len, REGS[i].name_len)) {
+			if (which_arg == 1) {
+				instr->arg1_type = REG;
+				instr->arg1.reg = REGS[i].enum_type;
+			}
+			else {
+				instr->arg2_type = REG;
+				instr->arg2.reg = REGS[i].enum_type;
+			}
+			return;
+		}
 	}
+	(reg_only) ?
+	(ERREXIT("Expected register argument at pos %d\n",
+	  (int) (arg - srcp_start))) :
+	(ERREXIT("Expected register or 8-bit integer argument at pos %d\n",
+	  (int) (arg - srcp_start)));
 }
 
 static inline void end_statement(int debug_statement_pos)
@@ -238,10 +242,28 @@ static inline void end_statement(int debug_statement_pos)
 	while (is_whitespace(*srcp_cur))	// consume trailing whitespace
 		srcp_cur++;
 	if (*srcp_cur != ';')
-		PRINTERR(
-		  "Expected semicolon ';' to end"
-		  " statement starting at pos %d\n",
-		  debug_statement_pos);
+		ERREXIT("Expected semicolon ';' to end"
+		  " statement at pos %d\n",
+		  (int) (srcp_cur - srcp_start));
+	srcp_cur++;
+}
+
+static void ___debug_instr(struct Instr *instr)
+{
+	printf("--DEBUG INSTR:--\n");
+	printf("Type: %d\n", instr->type);
+	printf("Arg1 type: %d\n", instr->arg1_type);
+	printf("Arg1 value: %d\n",
+	  instr->arg1_type == REG ? (int) instr->arg1.reg : instr->arg1.int8);
+	
+	switch (instr->type) {
+		case PUSH: case POP: case INC: case DEC:
+			break;
+		default:
+			printf("Arg2 type: %d\n", instr->arg2_type);
+			printf("Arg2 value: %d\n",
+			  instr->arg2_type == REG ? (int) instr->arg2.reg : instr->arg2.int8);
+	}
 }
 
 // gonna add a dynamically resizing array to contain instr struct elements
@@ -249,96 +271,69 @@ static void parse_src(char src[], int src_len,
   struct Instr *parsed_instrs, int *instrs_len)
 {
 	srcp_cur = srcp_start = src; // only using a pointer to a local variable during it's lifetime, i think it's fine
-	int wat = 1;
-	while(wat--) {	// will change to compare pointers
+	while(*srcp_cur != '\0') {	// will change to compare pointers
 		struct Instr instr;
 		int instr_name_len = 0;
 		char *instr_name = get_wordp(&instr_name_len);
 
 		if (instr_name_len == 0) {
-			PRINTERR(
-			  "Expected instruction at pos %d\n",
+			ERREXIT("Expected instruction at pos %d\n",
 			  (int) (srcp_cur - srcp_start));
-			  exit(1);
 		}
 			
-		int statement_start_pos = (int)
-		  (instr_name - srcp_start);
-
+		int statement_start_pos = (int) (instr_name - srcp_start);
 		bool has_two_args = false;
+		
 		set_instr_type_info(&instr, instr_name,
 		  instr_name_len, &has_two_args);
-
-		// DEBUG instr
-		printf("INSTR STR LEN: %d\n", instr_name_len);
-		printf("INSTR ARG ENUM: %d\n", instr.type);
-		printf("INSTR CHARS:\n");
-		for (int i = 0; i < instr_name_len; i++)
-			printf("%c\n", instr_name[i]);
-		// END DEBUG
 		
 		int arg1_len;
 		char *arg1 = get_wordp(&arg1_len);
+		bool arg1_is_reg_only = (instr.type == PUSH) ? false : true;
 
-		// DEBUG arg1
-		printf("ARG1 STR LEN: %d\n", arg1_len);
-		printf("ARG1 CHARS:\n");
-		for (int i = 0; i < arg1_len; i++)
-			printf("c: %c\n", arg1[i]);
-
-		printf("Has two args: %d\n", has_two_args);
-
-		// END DEBUG
-		
 		if (has_two_args) {
 			int arg2_len;
 			char *arg2 = get_wordp(&arg2_len);
 
 			if (arg1_len == 0) {
-				PRINTERR(
+				ERREXIT(
 				  "Expected 2 args for instruction starting at pos %d\n",
 				  statement_start_pos);
-				  exit(1);
 			}
 
 			if (arg2_len == 0) {
-				PRINTERR(
+				ERREXIT(
 				  "Expected arg 2 for instruction starting at pos %d\n",
 				  statement_start_pos);
-				  exit(1);
 			}
-			
-			// DEBUG arg2
-			printf("ARG2 STR LEN: %d\n", arg2_len);
-			printf("ARG2 CHARS:\n");
-			for (int i = 0; i < arg2_len; i++)
-				printf("c: %c\n", arg2[i]);
-			// END DEBUG
 
-	//		set_instr_args_info(&instr, arg1, arg1_len,
-	//		  arg2, arg2_len);
+			set_instr_arg_info(&instr, 1, arg1,
+			  arg1_len, arg1_is_reg_only);
+			set_instr_arg_info(&instr, 2, arg2,
+			  arg2_len, false);
 		}
 		else {
 			if (arg1_len == 0) {
-				PRINTERR(
+				ERREXIT(
 				  "Expected arg for instruction starting at pos %d\n",
 				  statement_start_pos);
-				  exit(1);
 			}
-	//		set_instr_arg1_info(&instr, arg1, arg1_len);
-			
+			set_instr_arg_info(&instr, 1, arg1,
+			  arg1_len, arg1_is_reg_only);
 		}
 
 		end_statement(statement_start_pos);
+		___debug_instr(&instr);
 	}
 }
  
 
 // testing
 int main(void)
-{	char src[] =
-	" MOV  ;  "
-	"ADD R2 R1;";
+{
+	char src[] =
+	" POP   R2 ;"
+	"ADD R1 123; INC R2;";
 
 	int src_len = sizeof src;	// byte is guaranteed to be 1 byte, no need to divide by an element's type size
 	int instrs_len;
