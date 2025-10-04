@@ -12,13 +12,12 @@
 #include <stdbool.h>
 #include <limits.h>
 
-#define ERREXIT(...) fprintf(stderr, __VA_ARGS__), exit(1)	// nahhhh not gonna surround this in parenthesis, arbitrarily
+/* asdsad */ // this leaves behind a single whitespace post-procesing
+#define ERREXIT(...) fprintf(stderr, __VA_ARGS__), exit(1)
 
 // gonna move these enum and struct definitions into a header file
 // and the base datatype of enumerations are implementation-defined!!!
 enum InstrType {
-	NOP,	// special placeholder solely for the first "instruction" to serve as a pointer
-	
 	// One arg instructions
 	INC,
 	DEC,
@@ -31,6 +30,9 @@ enum InstrType {
 	ADD,
 	SUB,
 	MUL,
+
+	// Special
+	PRINTF
 };
 
 enum Reg {
@@ -108,7 +110,7 @@ static const struct REG_MATCH_INFO REGS[] = {
 static char *srcp_cur, *srcp_start;
 
 // strncmp but worse
-static bool strcmp_with_lens(const char *str1, const char *str2,
+static inline bool strcmp_with_lens(const char *str1, const char *str2,
   const int str1_len, const int str2_len)
 {
 	if (str1_len != str2_len) return false;
@@ -164,7 +166,6 @@ static int8_t str_to_int8_t_with_len(char *str, int len)
 	int sum = 0;
 	char *int_start = str + len - 1;
 	while (int_start >= str) {
-		printf("AAA: %c\n", *int_start);
 		sum += (*int_start - '0') * exp;
 		int_start--, exp *= 10;
 	}
@@ -185,6 +186,7 @@ static void set_instr_type_info(struct Instr *instr,
 	// i am most likely going to replace this with a hashmap
 	static const int INSTRS_COUNT = (int)	// cast size_t to int
 	  (sizeof INSTRS / sizeof *INSTRS);
+
 	for (int i = 0; i < INSTRS_COUNT; i++) {
 		if (strcmp_with_lens(instr_name,
 		  INSTRS[i].name, instr_name_len, INSTRS[i].name_len)) {
@@ -192,8 +194,22 @@ static void set_instr_type_info(struct Instr *instr,
 			*has_two_args = INSTRS[i].uses_two_args;
 			return;
 		}
+/*			// DEBUG
+			printf("YES START: %d\n!!!\n", i);
+			printf("INSTR STR START:\n");
+			printf("LEN: %d\n", instr_name_len);
+			for (int a = 0; a < instr_name_len; a++) printf("%c\n", instr_name[a]);
+			printf("INSTR STR END\n");
+
+			printf("MATCH STR START:\n");
+			printf("LEN: %d\n", INSTRS[i].name_len);
+			for (int a = 0; a < INSTRS[i].name_len; a++) printf("%c\n", INSTRS[i].name[a]);
+			printf("MATCH STR END\n");
+			printf("YES END!!!\n\n\n");
+			// END DEBUG
+			*/
 	}
-	ERREXIT( "Invalid instruction at pos %d\n",
+	ERREXIT("Invalid instruction at pos %d\n",
 	  (int) (instr_name - srcp_start));
 }
 
@@ -237,7 +253,7 @@ static void set_instr_arg_info(struct Instr *instr,
 	  (int) (arg - srcp_start)));
 }
 
-static inline void end_statement(int debug_statement_pos)
+static inline void end_statement(void)
 {
 	while (is_whitespace(*srcp_cur))	// consume trailing whitespace
 		srcp_cur++;
@@ -264,14 +280,21 @@ static void ___debug_instr(struct Instr *instr)
 			printf("Arg2 value: %d\n",
 			  instr->arg2_type == REG ? (int) instr->arg2.reg : instr->arg2.int8);
 	}
+	printf("\n");
 }
 
 // gonna add a dynamically resizing array to contain instr struct elements
-static void parse_src(char src[], int src_len,
-  struct Instr *parsed_instrs, int *instrs_len)
+static void parse_src(char src[], struct Instr *parsed_instrs,
+  int *instrs_len)
 {
 	srcp_cur = srcp_start = src; // only using a pointer to a local variable during it's lifetime, i think it's fine
-	while(*srcp_cur != '\0') {	// will change to compare pointers
+	while (*srcp_cur == ' ') {
+		if (*srcp_cur == '\0') return;
+		srcp_cur++;
+	}
+
+	*instrs_len = 0;
+	while(*srcp_cur != '\0') {	// do not enter a string initialized via an array without a null terminator at the end lol
 		struct Instr instr;
 		int instr_name_len = 0;
 		char *instr_name = get_wordp(&instr_name_len);
@@ -322,7 +345,8 @@ static void parse_src(char src[], int src_len,
 			  arg1_len, arg1_is_reg_only);
 		}
 
-		end_statement(statement_start_pos);
+		(*instrs_len)++;
+		end_statement();
 		___debug_instr(&instr);
 	}
 }
@@ -332,14 +356,26 @@ static void parse_src(char src[], int src_len,
 int main(void)
 {
 	char src[] =
-	" POP   R2 ;"
-	"ADD R1 123; INC R2;";
+	"MOV R3 5;"
+	"MOV R1 65;"
+	"MOV R4 45;"
+	"MOV R3 25;"
 
-	int src_len = sizeof src;	// byte is guaranteed to be 1 byte, no need to divide by an element's type size
-	int instrs_len;
-	struct Instr PLACE_HOLDER = {.type = NOP};
-	struct Instr *parsed_instrs = &PLACE_HOLDER;
+	"PUSH R3;"
+	"PUSH 90;"
+	"PUSH R2;"
+	"PUSH R4;"
+	"PUSH R2;"
+	"POP R3;";
 
-	parse_src(src, src_len, parsed_instrs, &instrs_len);
+
+	/*
+		byte is guaranteed to be 1 byte (which is not always 8 bits), no need to divide by an element's type size
+		wait.. why does this comment exist again?
+	*/
+	int instrs_len = 0;
+	struct Instr *parsed_instrs = NULL;
+	
+	parse_src(src, parsed_instrs, &instrs_len);
 	return 0;
 }
