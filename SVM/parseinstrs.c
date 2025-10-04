@@ -12,7 +12,7 @@
 #include <stdbool.h>
 #include <limits.h>
 
-#define ERREXIT(...) fprintf(stderr, __VA_ARGS__), exit(0)
+#define ERREXIT(...) fprintf(stderr, __VA_ARGS__), exit(1)	// nahhhh not gonna surround this in parenthesis, arbitrarily
 
 // gonna move these enum and struct definitions into a header file
 // and the base datatype of enumerations are implementation-defined!!!
