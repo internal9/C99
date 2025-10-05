@@ -1,8 +1,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#ifndef PARSEINSTRSH
-#define PARSEINSTRSH
 enum InstrType {
         // One arg instructions
         PRINTREG,
@@ -50,4 +48,3 @@ struct Instr {
 
 struct Instr *parse_src(char src[], int *instrs_len);
 void ___debug_instr(struct Instr *instr);
-#endif

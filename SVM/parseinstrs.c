@@ -290,14 +290,15 @@ struct Instr *parse_src(char src[], int *instrs_len)
 		(*instrs_len)++;
 
 		// better than trying to manually free and malloc again
-		parsed_instrs = realloc(parsed_instrs,
-		  *instrs_len * sizeof(struct Instr));
+		struct Instr *parsed_instrs_resize = realloc(parsed_instrs,
+		  (size_t) *instrs_len * sizeof(struct Instr));
 
-		if (parsed_instrs == NULL) {
+		if (parsed_instrs_resize == NULL) {
 			free(parsed_instrs);
 			ERREXIT("Failed to alloc memory for instructions\n");
 		}
 
+		parsed_instrs = parsed_instrs_resize;
 		parsed_instrs[*instrs_len - 1] = instr;
 		end_statement();
 	}
