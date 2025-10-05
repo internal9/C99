@@ -5,6 +5,7 @@
 #define PARSEINSTRSH
 enum InstrType {
         // One arg instructions
+        PRINTREG,
         INC,
         DEC,
         PUSH,
@@ -15,10 +16,7 @@ enum InstrType {
         LDA,
         ADD,
         SUB,
-        MUL,
-
-        // Special
-        PRINTF
+        MUL
 };
 
 enum Reg {

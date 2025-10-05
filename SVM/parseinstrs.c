@@ -33,7 +33,8 @@ struct REG_MATCH_INFO {
 };
 
 // 'name_len' in case i want to add instructions with identiifers of varying length
-static const struct INSTR_MATCH_INFO INSTRS[] = {	// ragged array
+static const struct INSTR_MATCH_INFO INSTRS[] = {
+	{.name = "PRINTREG", .name_len = 8, .enum_type = PRINTREG, .uses_two_args = false},
 	{.name = "INC", .name_len = 3, .enum_type = INC, .uses_two_args = false},
 	{.name = "DEC", .name_len = 3, .enum_type = DEC, .uses_two_args = false},
 	{.name = "PUSH", .name_len = 4, .enum_type = PUSH, .uses_two_args = false},
