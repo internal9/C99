@@ -20,14 +20,14 @@
 // and the base datatype of enumerations are implementation-defined!!!
 
 struct INSTR_MATCH_INFO {
-	char *name;
+	const char *name;
 	int name_len;
 	enum InstrType enum_type;
 	bool uses_two_args;
 };
 
 struct REG_MATCH_INFO {
-	char *name;
+	const char *name;
 	int name_len;
 	enum Reg enum_type;
 };
