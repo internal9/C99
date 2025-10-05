@@ -291,7 +291,7 @@ struct Instr *parse_src(char src[], int *instrs_len)
 
 		// better than trying to manually free and malloc again
 		parsed_instrs = realloc(parsed_instrs,
-		  (size_t) (*instrs_len * sizeof(struct Instr)));
+		  *instrs_len * sizeof(struct Instr));
 
 		if (parsed_instrs == NULL) {
 			free(parsed_instrs);
