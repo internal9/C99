@@ -2,14 +2,14 @@ struct Instr *parse_src(char src[], int *instrs_len)
 {
         struct Instr *parsed_instrs = NULL;
         srcp_cur = srcp_start = src; // only using a pointer to a local variable during it's lifetime, i think it's fine
-        *instrs_len = 0;
 
+        *instrs_len = 0;
         while(*srcp_cur != '\0') {      // do not enter a string initialized via an array without a null terminator at the end lol
-                struct Instr instr;
                 while (is_whitespace(*srcp_cur))
                         srcp_cur++;
                 if (*srcp_cur == '\0') break;
 
+                struct Instr instr;
                 int instr_name_len = 0;
                 char *instr_name = get_wordp(&instr_name_len);
 
@@ -60,21 +60,16 @@ struct Instr *parse_src(char src[], int *instrs_len)
                 }
 
                 (*instrs_len)++;
+                end_statement();
 
-                // better than trying to manually free and malloc again
-//              parsed_instrs = realloc(parsed_instrs,
-//                (size_t) (*instrs_len * sizeof(struct Instr)));
+                parsed_instrs = realloc(parsed_instrs,
+                  (size_t) (*instrs_len * sizeof(struct Instr)));
 
                 if (parsed_instrs == NULL) {
                         free(parsed_instrs);
                         ERREXIT("Failed to alloc memory for instructions\n");
                 }
-
-                parsed_instrs[*instrs_len] = instr;
-                end_statement();
+                parsed_instrs[*instrs_len - 1] = instr;
         }
-
-        for (int i = 0; i < *instrs_len; i++)
-                ___debug_instr(parsed_instrs + i);
         return parsed_instrs;
-} 
+}
