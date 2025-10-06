@@ -127,6 +127,8 @@ int main(void)
 	printf("RUNNING INSTRUCTIONS:\n");
 	for (int i = 0; i < instrs_len; i++)
 		run_instr(parsed_instrs + i);
+
+	free(parsed_instrs);
 	return 0;
 }
 
