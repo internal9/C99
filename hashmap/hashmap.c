@@ -194,6 +194,6 @@ int main(void)
 	hashmap_resize(pmap);
 	hashmap_resize(pmap);
 	
-	printf("%ld\n", pmap->stored); */
+	printf("%zu\n", pmap->stored); */
 	return 0;
 }
