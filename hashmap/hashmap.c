@@ -141,15 +141,13 @@ int main(void)
 	struct HashMap map = {
 		.buckets = calloc((size_t) HASHMAP_INIT_SIZE * sizeof(struct Bucket),  sizeof(struct Bucket)),
 		.size = (size_t) HASHMAP_INIT_SIZE
-	};
+	}, *pmap = &map;
 
 	if (map.buckets == NULL)
 	{
 		perror("Failed to allocate memory for hashmap buckets");
 		return 1;
 	}
-
-	struct HashMap *pmap = &map;
 
 /*	int asd = 23;
 	hashmap_put(pmap, "1234567890", 10, (void*) &asd);
