@@ -14,10 +14,10 @@
 uint64_t fnv1a_hash(const char *str, size_t str_len)
 {
     uint64_t hash = 0xcbf29ce484222325;
-    static const uint64_t fnvprime = 0x100000001b3;
+    static const uint64_t FNV_PRIME = 0x100000001b3;
     
 	for (size_t i = 0; i < str_len; i ++)
-		hash ^= (uint64_t) str[i], hash *= fnvprime;
+		hash ^= (uint64_t) str[i], hash *= FNV_PRIME;
 	return hash;
 }
 
