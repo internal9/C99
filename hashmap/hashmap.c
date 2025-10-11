@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include "hashmap.h"
 
-#define MAX_LOAD_FACTOR 7
+#define MAX_LOAD_FACTOR 80
 #define EMPTY (void*) 0	// NULL is implementation defined
 #define DELETED (void*) -1
 #define HASHMAP_NOVALUE (void*) -2	// Allow for keys that store values of 0
@@ -14,10 +14,10 @@
 uint64_t fnv1a_hash(const char *str, size_t str_len)
 {
     uint64_t hash = 0xcbf29ce484222325;
-    static const uint64_t FNV_PRIME = 0x100000001b3;
-    
-	for (size_t i = 0; i < str_len; i ++)
-		hash ^= (uint64_t) str[i], hash *= FNV_PRIME;
+    static const uint64_t fnvprime = 0x100000001b3;
+
+	for (size_t i = 0; i < str_len; i++)
+		hash ^= (uint64_t) str[i], hash *= fnvprime;
 	return hash;
 }
 
@@ -37,12 +37,11 @@ static void hashmap_resize(struct HashMap *pmap)
 
 	for (size_t i = 0; i < old_size; i++)
 	{
-		struct Bucket bucket = old_buckets[i];
-		if (bucket.key == EMPTY || bucket.key == DELETED)
+		struct Bucket *old_bucket = old_buckets + i;
+		if (old_bucket->key == EMPTY || old_bucket->key == DELETED)
 			continue;
 
-		uint64_t hash = fnv1a_hash(bucket.key, bucket.key_len);
-		pmap->buckets[(hash) % pmap->size] = bucket;
+		hashmap_put(pmap, old_bucket->key, old_bucket->key_len, old_bucket->pvalue);
 	}
 	free(old_buckets);
 }
@@ -50,9 +49,8 @@ static void hashmap_resize(struct HashMap *pmap)
 void hashmap_put(struct HashMap *pmap, const char *key, size_t key_len, void *pvalue)
 {
 	uint64_t hash = fnv1a_hash(key, key_len);
-	int load_factor = (int) (pmap->stored * 100 / pmap->size);
+	int load_factor = (int) (pmap->stored  * 100 / pmap->size);
 
-	// printf("LOAD FACTOR: %d\n", load_factor);
 	if (load_factor > MAX_LOAD_FACTOR)
 		hashmap_resize(pmap);
 
@@ -68,10 +66,9 @@ void hashmap_put(struct HashMap *pmap, const char *key, size_t key_len, void *pv
 			pmap->stored++;
 			break;
 		}
-		else if (strncmp(key, bucket->key, key_len))
+		else if (strncmp(key, bucket->key, key_len) == 0)
 		{
 			bucket->pvalue = pvalue;
-			pmap->stored++;
 			break;
 		}
 	}
@@ -87,7 +84,8 @@ void *hashmap_get(struct HashMap *pmap, const char *key, size_t key_len)
 	if (bucket.key == EMPTY)
 		return HASHMAP_NOVALUE;
 
-	if (bucket.key != DELETED && strncmp(key, bucket.key, key_len) == 0)
+	if (bucket.key != DELETED && key_len == bucket.key_len &&
+	  strncmp(key, bucket.key, key_len) == 0)
 		return bucket.pvalue;
 
 	// there must be a collision, some other key hashed to the same index
@@ -96,11 +94,10 @@ void *hashmap_get(struct HashMap *pmap, const char *key, size_t key_len)
 		bucket = pmap->buckets[(hash + i) % pmap->size];	// modulo causes wrap around to (hash % size) - 1
 		if (bucket.key == EMPTY || bucket.key == DELETED)
 			continue;
-	
-		if (strncmp(key, bucket.key, key_len) == 0)
+
+		if (key_len == bucket.key_len && strncmp(key, bucket.key, key_len) == 0)
 			return bucket.pvalue;
 	}
-	printf("Get: No specified key found!\n");
 	return HASHMAP_NOVALUE;	// idk if i should use null, since it's implementation defined
 }
 
@@ -149,49 +146,34 @@ int main(void)
 		return 1;
 	}
 
-/*	int asd = 23;
-	hashmap_put(pmap, "1234567890", 10, (void*) &asd);
-	asd = 23333;
-	hashmap_resize(pmap);
-	hashmap_resize(pmap);
-	hashmap_resize(pmap);
-	hashmap_put(pmap, "56", 2, NULL);
-	hashmap_resize(pmap);
-	hashmap_put(pmap, "56", 2, NULL);
-	hashmap_put(pmap, "256", 3, NULL);
-	hashmap_put(pmap, "456", 3, NULL);
-		hashmap_resize(pmap);
-	hashmap_resize(pmap);
+	// TESTING
+	#define KEY_COUNT 1000
+	char *strs[KEY_COUNT];
 
-	hashmap_put(pmap, "516", 3, NULL);
-	hashmap_put(pmap, "556", 3, NULL);
-	hashmap_put(pmap, "576", 3, NULL);
+	// trying out this arena alloc or smthn
+	char *keys_mem = malloc(8 * KEY_COUNT), *current = keys_mem;
+	for (int i = 0; i < KEY_COUNT; i++)
+	{
+		char *key = current;
+		current += 8;
+		key[7] = '\0';
+		strncpy(key, "KEY", 3);
+		for (int num = i, ii = 3; ii >= 0; ii--)
+		{
+			*(key + 3 + ii) = (int8_t) (num % 10) + '0';
+			num /= 10;
+		}
+		// printf("str: %s\n", key);
+		strs[i] = key;
 
-		hashmap_resize(pmap);
-	hashmap_resize(pmap);
-	hashmap_resize(pmap);
-
-	hashmap_put(pmap, "5b6", 3, NULL);
-	hashmap_put(pmap, "5c6", 3, NULL);
-
-		hashmap_resize(pmap);
-	hashmap_resize(pmap);
-	hashmap_resize(pmap);
-	hashmap_resize(pmap);
-	long asdb = 23345;
-
-	hashmap_put(pmap, "5zz6", 4, &asdb);
-
-		hashmap_resize(pmap);
-	hashmap_resize(pmap);
-
-	hashmap_put(pmap, "5ll6", 4, NULL);
-	hashmap_put(pmap, "5pp6", 4, NULL);
-
-	hashmap_resize(pmap);
-	hashmap_resize(pmap);
-	hashmap_resize(pmap);
+		hashmap_put(pmap, key, 7, (void*) 23);
+	}
+	printf("HASHMAP SIZE: %zu\n", pmap->size);
 	
-	printf("%zu\n", pmap->stored); */
+	for (int i = 0; i < KEY_COUNT; i++)
+		if (hashmap_get(pmap, strs[i], 7) == HASHMAP_NOVALUE)
+			printf("EMPTY\n");
+
+	free(keys_mem);
 	return 0;
 }
