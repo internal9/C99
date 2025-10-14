@@ -52,7 +52,8 @@ static void run_bytecode(FILE *p_bytecode_file)
 		}
 
 		p_bytes = new_p_bytes;
-		memcpy(p_bytes, file_buf, FILE_BUF_SIZE);
+		memcpy(p_bytes + (FILE_BUF_SIZE * (block_count - 1)),
+		  file_buf, (size_t) FILE_BUF_SIZE);
 		printf("bytes cache size: %d\n", FILE_BUF_SIZE * block_count);
 	}
 
