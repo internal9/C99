@@ -46,8 +46,8 @@ long int regs[] = {
 
 static uint8_t stack[STACK_SIZE]; // full stack implementation, 'ip' points to most recently pushed byte
 
-static long int ip = 0;	// although this is implicitly initialized to 0, doing so explicitly is good practice
-static long int file_size;
+static unsigned long int ip = 0;	// although this is implicitly initialized to 0, doing so explicitly is good practice
+static unsigned long int file_size;
 static uint8_t *p_bytes;
 
 static uint8_t expect_byte(const char *err_msg)
@@ -98,7 +98,7 @@ static void op_jmpfv(void)
 	if (file_size - ip < 4)
 	{
 		fprintf(stderr,
-			"Expected 4-byte integer for offset for instr 'jmpv', instead got %d bytes\n",
+			"Expected 4-byte unsigned integer for offset for instr 'jmpv', instead got %d bytes\n",
 			(int) (file_size - ip));
 		exit(EXIT_FAILURE);
 	}
@@ -122,25 +122,18 @@ static void op_jmpfv(void)
 
 	// printf("B2: %.2X\n", *(p_bytes + ip));
 
-
-	
 	if (offset == 0) return;
-	if (LONG_MAX - (long int) offset < ip - (long int) offset)
+	if (ip > ULONG_MAX - (unsigned long int) offset)
 	{
 		fprintf(stderr, "Offset of '%d' for instr 'jmpv' will cause overflow for instruction pointer\n", offset);
 		exit(EXIT_FAILURE);
 	}
 		
-	ip += (long int) offset;
+	ip += (unsigned long int) offset;
 	if (ip > file_size)
 	{
 		fprintf(stderr, "Instruction pointer after adding offset of '%d' for instr 'jmpv'"
 			"is greater than file size (byte count) of %ld\n", offset, file_size);
-		exit(EXIT_FAILURE);
-	}
-	else if (ip < 0)
-	{
-		fprintf(stderr, "IP after offset of '%d' for instr 'jmpv' cannot be a negative value of %ld\n", offset, ip);
 		exit(EXIT_FAILURE);
 	}
 }
@@ -168,13 +161,14 @@ static void op_jmpbr(void)
 	int offset; // should offset bet a long instead?
 	memcpy(&offset, p_bytes + ip, (size_t) 4);
 	
-	if (offset == 0) return;		
-	ip -= (long int) offset;
-	if (ip < 0)
+	if (offset == 0) return;
+	if (ip < (unsigned long int) offset)
 	{
-		fprintf(stderr, "IP after offset of '%d' for instr 'jmpv' cannot be a negative value of %ld\n", offset, ip);
+		fprintf(stderr, "Offset of '%d' for instr 'jmpv' will cause underflow for instruction pointer\n", offset);
 		exit(EXIT_FAILURE);
 	}	
+
+	ip -= (unsigned long int) offset;
 }
 
 static void run_bytecode(void)
@@ -200,12 +194,14 @@ static void init_bytecode(FILE *p_bytecode_file)
 		exit(errno);
 	}
 
-	file_size = ftell(p_bytecode_file);
-	if (file_size == (long int) -1)
+	long int ftell_result = ftell(p_bytecode_file);
+	if (ftell_result == -1L)
 	{
 		perror("Failed to read bytecode file");	// Especially file size that caused an overflow
 		exit(errno);
 	}
+
+	file_size = (unsigned long int) ftell_result;	// i hate this
 
 	if (file_size == (long int) 0)
 		return;
