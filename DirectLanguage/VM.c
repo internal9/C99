@@ -2,10 +2,18 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <limits.h>
 #include <errno.h>
 
+#define ABS(x) ((x) >= 0 ? x : -(x)
+
+#define INT64_SIZE 8
 #define STACK_SIZE 512	// i sure do love arbitrary numbers
 
+/*
+	TODO:
+	* debugging info for specific lines and positions
+*/
 /*
 	*base_instr_name suffix1 suffix2
 	*suffix2 determines how something will be moved into something specified by suffix1
@@ -16,12 +24,13 @@
 
 enum OPCODE
 {
-	MOVRR,
-	MOVRV,
-	MOVSR,
-	MOVSV,
+	MOVRR = 0,
+	MOVRV = 1,
+	MOVSR = 2,
+	MOVSV = 3,
 
-		
+	JMPFV = 4,	// JMP forwards of literal offset count
+	JMPFR = 5,	// JMP forwards of register value count
 };
 
 enum REG
@@ -30,12 +39,12 @@ enum REG
 	RSP,
 };
 
-uint8_t regs[] = {
+long int regs[] = {
 	[RBP] = 0,
 	[RSP] = 0,
 };
 
-static uint8_t stack[STACK_SIZE]; 
+static uint8_t stack[STACK_SIZE]; // full stack implementation, 'ip' points to most recently pushed byte
 
 static long int ip = 0;	// although this is implicitly initialized to 0, doing so explicitly is good practice
 static long int file_size;
@@ -52,19 +61,133 @@ static uint8_t expect_byte(const char *err_msg)
 	return p_bytes[ip++];
 }
 
-static void op_movrr()
+static void stack_push(uint8_t byte)
 {
-	uint8_t	src_reg = expect_byte("Expected source reg for instr 'movrr'");
-} 
+	if (regs[RSP] == STACK_SIZE - 1)
+	{
+		fprintf(stderr, "VM stack overflow\n");
+		exit(EXIT_FAILURE);
+	}
+
+	stack[++regs[RSP]] = byte;
+}
+
+// wait.. why did i make this again?
+static void op_movrr(void)
+{
+	// uint8_t	reg_reg = expect_byte("Expected source reg for instr 'movrr'");
+	// uint8_t	reg_dest = expect_byte("Expected destination reg for instr 'movrr'");
+	
+}
+
+static void op_pushvi(void)
+{
+	static char err_msg[] = "Expected byte %d for instr 'pushvi'";
+	static const size_t err_msg_size = sizeof err_msg;
+
+	for (int i = 0; i < INT64_SIZE; i++)
+	{
+		snprintf(err_msg, err_msg_size, "Expected byte %d for integer literal for instr 'pushvi'", i + 1);
+		uint8_t byte = expect_byte(err_msg);
+		stack_push(byte);
+	}
+}
+
+static void op_jmpfv(void)
+{
+	if (file_size - ip < 4)
+	{
+		fprintf(stderr,
+			"Expected 4-byte integer for offset for instr 'jmpv', instead got %d bytes\n",
+			(int) (file_size - ip));
+		exit(EXIT_FAILURE);
+	}
+
+
+	/*
+	// !!! THIS ASSUMES LITTLE ENDIAN!!! (LSB stored at lowest mem addr) (might add big endian support via conditional compilation)
+	int offset = 0x00000000
+		| expect_byte(NULL) << 24	// value 1 byte is usually represented by 4 hexadecimal digits
+		| expect_byte(NULL) << 16
+		| expect_byte(NULL) << 8
+		| expect_byte(NULL)
+	*/
+
+	/*
+		!!! THIS ASSUMES THAT INTS ARE STORED IN LITTLE ENDIAN IN THE BYTECODE FILE!!!
+		(LSB stored at lowest mem addr) (might add big endian support via conditional compilation)
+	*/
+	int offset; // should offset bet a long instead?
+	memcpy(&offset, p_bytes + ip, (size_t) 4);
+
+	// printf("B2: %.2X\n", *(p_bytes + ip));
+
+
+	
+	if (offset == 0) return;
+	if (LONG_MAX - (long int) offset < ip - (long int) offset)
+	{
+		fprintf(stderr, "Offset of '%d' for instr 'jmpv' will cause overflow for instruction pointer\n", offset);
+		exit(EXIT_FAILURE);
+	}
+		
+	ip += (long int) offset;
+	if (ip > file_size)
+	{
+		fprintf(stderr, "Instruction pointer after adding offset of '%d' for instr 'jmpv'"
+			"is greater than file size (byte count) of %ld\n", offset, file_size);
+		exit(EXIT_FAILURE);
+	}
+	else if (ip < 0)
+	{
+		fprintf(stderr, "IP after offset of '%d' for instr 'jmpv' cannot be a negative value of %ld\n", offset, ip);
+		exit(EXIT_FAILURE);
+	}
+}
+
+static void op_jmpfr(void)
+{
+	
+}
+
+static void op_jmpbv(void)
+{
+	
+}
+
+static void op_jmpbr(void)
+{
+	if (file_size - ip < 4)
+	{
+		fprintf(stderr,
+			"Expected 4-byte integer for offset for instr 'jmpv', instead got %d bytes\n",
+			(int) (file_size - ip));
+		exit(EXIT_FAILURE);
+	}
+
+	int offset; // should offset bet a long instead?
+	memcpy(&offset, p_bytes + ip, (size_t) 4);
+	
+	if (offset == 0) return;		
+	ip -= (long int) offset;
+	if (ip < 0)
+	{
+		fprintf(stderr, "IP after offset of '%d' for instr 'jmpv' cannot be a negative value of %ld\n", offset, ip);
+		exit(EXIT_FAILURE);
+	}	
+}
 
 static void run_bytecode(void)
 {
+	printf("INSTR POINTER: %ld\n FILE SIZE: %ld\n", ip, file_size);
 	while (ip != file_size)
 	{
 		uint8_t byte = expect_byte(NULL);
+		printf("HEX BYTE: %X\n", byte);
 		switch (byte)
 		{
 			case MOVRR: op_movrr(); break;
+			case JMPFV: op_jmpfv(); break;
 		}
 	}
 }
@@ -80,7 +203,7 @@ static void init_bytecode(FILE *p_bytecode_file)
 	file_size = ftell(p_bytecode_file);
 	if (file_size == (long int) -1)
 	{
-		perror("Failed to read bytecode file");
+		perror("Failed to read bytecode file");	// Especially file size that caused an overflow
 		exit(errno);
 	}
 
