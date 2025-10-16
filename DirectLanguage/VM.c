@@ -103,7 +103,6 @@ static void op_jmpfv(void)
 		exit(EXIT_FAILURE);
 	}
 
-
 	/*
 	// !!! THIS ASSUMES LITTLE ENDIAN!!! (LSB stored at lowest mem addr) (might add big endian support via conditional compilation)
 	int offset = 0x00000000
@@ -120,22 +119,30 @@ static void op_jmpfv(void)
 	int offset; // should offset bet a long instead?
 	memcpy(&offset, p_bytes + ip, (size_t) 4);
 
-	// printf("B2: %.2X\n", *(p_bytes + ip));
+	if (offset < 4)
+	{
+		fprintf(stderr, "Offset of '%d' for instr 'jmpv' is less than 4 and"
+			" would've jumped to byte part of offset integer\n", offset);
+		exit(EXIT_FAILURE);
+	}
 
-	if (offset == 0) return;
 	if (ip > ULONG_MAX - (unsigned long int) offset)
 	{
-		fprintf(stderr, "Offset of '%d' for instr 'jmpv' will cause overflow for instruction pointer\n", offset);
+		fprintf(stderr, "Offset of '%d' for instr 'jmpv' will cause overflow" 
+			"for instruction pointer\n", offset);
 		exit(EXIT_FAILURE);
 	}
-		
+	
 	ip += (unsigned long int) offset;
-	if (ip > file_size)
+	if (ip > file_size - 1)
 	{
-		fprintf(stderr, "Instruction pointer after adding offset of '%d' for instr 'jmpv'"
-			"is greater than file size (byte count) of %ld\n", offset, file_size);
+		fprintf(stderr, "Instruction pointer has value of '%lu' after adding offset"
+			" of '%d' for instr 'jmpv' which is greater than last byte offset of %lu\n",
+			ip, offset, file_size - 1);
 		exit(EXIT_FAILURE);
 	}
+
+	printf("BYTE POST JUMP: %X\n", p_bytes[ip]);
 }
 
 static void op_jmpfr(void)
@@ -173,7 +180,7 @@ static void op_jmpbr(void)
 
 static void run_bytecode(void)
 {
-	printf("INSTR POINTER: %ld\n FILE SIZE: %ld\n", ip, file_size);
+	printf("INSTR POINTER: %lu\n FILE SIZE: %lu\n", ip, file_size);
 	while (ip != file_size)
 	{
 		uint8_t byte = expect_byte(NULL);
@@ -226,7 +233,7 @@ static void init_bytecode(FILE *p_bytecode_file)
 		exit(errno);
 	}
 	
-	printf("Bytecode file size: %ld\n", file_size);
+	printf("Bytecode file size: %lu\n", file_size);
 }
 
 int main(int argc, char *argv[])
