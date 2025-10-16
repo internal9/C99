@@ -22,31 +22,103 @@
 
 enum OPCODE
 {
+// MOV REG
 	MOVRR = 0,
 	MOVRV = 1,
 	MOVSR = 2,
 	MOVSV = 3,
 
-	PUSHV = 4,
-	POP = 5,
+// MOV STACK
+	MOVB1STV,
+	MOVB1STST,
 
-	JMPFV = 5,	// JMP forwards of literal offset count
-	JMPFR = 6,	// JMP forwards of register value count
-	JMPBV = 7,	// JMP backwards of literal offset count
+	MOVB8STV,
+	MOVB8STST,
+
+// INC STACK
+	INCB1STV,
+	INCB1STST,
+
+	INCB8STV,
+	INCB8STST,
+
+// ADD STACK
+	ADDB1STV,		// ADD value to value located on stack address
+	ADDB1STST,
+
+	ADDB8STV,
+	ADDB8STST,
+
+// SUB STACK
+	SUBB1STV,
+	SUBB1STST,
+
+	SUBB8STV,
+	SUBB8STST,
+
+// DEC STACK
+	DECB1STV,
+	DECB1STST,
+
+	DECB8STV,
+	DECB8STST,
+
+// PUSH
+	PUSHB1V,
+	PUSHB1ST,
+	POPB1R,
+
+	PUSHB8V,
+	PUSHB8ST,
+	POPB8R,	
+
+// UNCONDITIONAL JMP
+	JMPFV,	// JMP forwards of literal offset count
+	JMPFR,	// JMP forwards of register value count
+	JMPBV,	// JMP backwards of literal offset count
+
+// CMP
+	CMPRV,
+	CMPSTV,
+
+// CONDITIONAL FORWARD JMP
+	JEFV,
+	JNEFV,
+
+	JGFV,
+	JGEFV,
+
+	JLFV,
+	JLEFV,
+
+// CONDITIONAL BACKWARD JMP
+	JEBV,
+	JNEBV,
+
+	JGBV,
+	JGEBV,
+
+	JLBV,
+	JLEBV,
+
+// IDK
+	CALL,	// implement via jmps?
+	RET,
 };
 
 enum REG
 {
+	RAX,
 	R1,
 	R2,
 	R3,
 	R4,
-	
 	RBP,
 	RSP,
 };
 
 long int regs[] = {
+	[RAX] = 0,
 	[RBP] = 0,
 	[RSP] = -1,
 };
@@ -230,7 +302,6 @@ static void run_bytecode(void)
 		switch (byte)
 		{
 			case MOVRR: op_movrr(); break;
-			case PUSHV: op_pushv(); break; 
 			case JMPFV: op_jmpfv(); break;
 			case JMPBV: op_jmpbv(); break;
 		}
