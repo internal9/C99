@@ -5,8 +5,6 @@
 #include <limits.h>
 #include <errno.h>
 
-#define ABS(x) ((x) >= 0 ? x : -(x)
-
 #define INT64_SIZE 8
 #define STACK_SIZE 512	// i sure do love arbitrary numbers
 
@@ -29,19 +27,28 @@ enum OPCODE
 	MOVSR = 2,
 	MOVSV = 3,
 
-	JMPFV = 4,	// JMP forwards of literal offset count
-	JMPFR = 5,	// JMP forwards of register value count
+	PUSHV = 4,
+	POP = 5,
+
+	JMPFV = 5,	// JMP forwards of literal offset count
+	JMPFR = 6,	// JMP forwards of register value count
+	JMPBV = 7,	// JMP backwards of literal offset count
 };
 
 enum REG
 {
+	R1,
+	R2,
+	R3,
+	R4,
+	
 	RBP,
 	RSP,
 };
 
 long int regs[] = {
 	[RBP] = 0,
-	[RSP] = 0,
+	[RSP] = -1,
 };
 
 static uint8_t stack[STACK_SIZE]; // full stack implementation, 'ip' points to most recently pushed byte
@@ -58,7 +65,7 @@ static uint8_t expect_byte(const char *err_msg)
 			fprintf(stderr, "%s\n", err_msg);
 		exit(EXIT_FAILURE);
 	}
-	return p_bytes[ip++];
+	return p_bytes[ip];
 }
 
 static void stack_push(uint8_t byte)
@@ -80,7 +87,7 @@ static void op_movrr(void)
 	
 }
 
-static void op_pushvi(void)
+static void op_pushvi64(void)
 {
 	static char err_msg[] = "Expected byte %d for instr 'pushvi'";
 	static const size_t err_msg_size = sizeof err_msg;
@@ -95,11 +102,11 @@ static void op_pushvi(void)
 
 static void op_jmpfv(void)
 {
-	if (file_size - ip < 4)
+	if (file_size - (ip + 1) < 4)
 	{
 		fprintf(stderr,
-			"Expected 4-byte unsigned integer for offset for instr 'jmpv', instead got %d bytes\n",
-			(int) (file_size - ip));
+			"Expected 4-byte unsigned integer for offset for instr 'jmpfv', instead got %d bytes\n",
+			(int) (file_size - (ip + 1)));
 		exit(EXIT_FAILURE);
 	}
 
@@ -117,18 +124,24 @@ static void op_jmpfv(void)
 		(LSB stored at lowest mem addr) (might add big endian support via conditional compilation)
 	*/
 	int offset; // should offset bet a long instead?
-	memcpy(&offset, p_bytes + ip, (size_t) 4);
+	memcpy(&offset, p_bytes + ip + 1, (size_t) 4);	// '+ 1' so ip points to first byte
 
-	if (offset < 4)
+	if (offset == 0)
 	{
-		fprintf(stderr, "Offset of '%d' for instr 'jmpv' is less than 4 and"
+		fprintf(stderr, "Jump offset cannot be '0'\n");
+		exit(EXIT_FAILURE);		
+	}
+
+	if (offset < 5)
+	{
+		fprintf(stderr, "Offset of '%d' for instr 'jmpfv' is less than 5 and"
 			" would've jumped to byte part of offset integer\n", offset);
 		exit(EXIT_FAILURE);
 	}
 
 	if (ip > ULONG_MAX - (unsigned long int) offset)
 	{
-		fprintf(stderr, "Offset of '%d' for instr 'jmpv' will cause overflow" 
+		fprintf(stderr, "Offset of '%d' for instr 'jmpfv' will cause overflow" 
 			"for instruction pointer\n", offset);
 		exit(EXIT_FAILURE);
 	}
@@ -137,7 +150,7 @@ static void op_jmpfv(void)
 	if (ip > file_size - 1)
 	{
 		fprintf(stderr, "Instruction pointer has value of '%lu' after adding offset"
-			" of '%d' for instr 'jmpv' which is greater than last byte offset of %lu\n",
+			" of '%d' for instr 'jmpfv' which is greater than the last byte offset of %lu\n",
 			ip, offset, file_size - 1);
 		exit(EXIT_FAILURE);
 	}
@@ -150,45 +163,76 @@ static void op_jmpfr(void)
 	
 }
 
+
 static void op_jmpbv(void)
 {
-	
-}
-
-static void op_jmpbr(void)
-{
-	if (file_size - ip < 4)
+	printf("asdsadda\n");
+	if (file_size - (ip + 1) < 4)
 	{
 		fprintf(stderr,
-			"Expected 4-byte integer for offset for instr 'jmpv', instead got %d bytes\n",
-			(int) (file_size - ip));
+			"Expected 4-byte integer for offset for instr 'jmpbv', instead got %d bytes\n",
+			(int) (file_size - (ip + 1)));
 		exit(EXIT_FAILURE);
 	}
 
 	int offset; // should offset bet a long instead?
-	memcpy(&offset, p_bytes + ip, (size_t) 4);
-	
-	if (offset == 0) return;
+	memcpy(&offset, p_bytes + ip + 1, (size_t) 4);
+
+	if (offset == 0)
+	{
+		fprintf(stderr, "Jump offset cannot be '0'\n");
+		exit(EXIT_FAILURE);		
+	}
+
 	if (ip < (unsigned long int) offset)
 	{
-		fprintf(stderr, "Offset of '%d' for instr 'jmpv' will cause underflow for instruction pointer\n", offset);
+		fprintf(stderr, "Offset of '%d' for instr 'jmpbv' will cause underflow for instruction pointer\n", offset);
 		exit(EXIT_FAILURE);
 	}	
 
 	ip -= (unsigned long int) offset;
 }
 
+static void op_jmpbr(void)
+{
+	
+}
+
+static void op_pushv(void)
+{
+	static const int INSTR_SIZE = 2;
+
+	if (ip == file_size - 1)	// 'ip' currently points to the 'pushv' byte
+	{
+		fprintf(stderr, "Expected '1' byte for instr 'pushv', got '0' bytes instead\n");
+		exit(EXIT_FAILURE);
+	}
+
+	printf("IP V SIZE: %lu %lu\n", ip, file_size);
+	uint8_t byte = p_bytes[ip + 1];
+	if (regs[RSP] == STACK_SIZE - 1)
+	{
+		fprintf(stderr, "VM stack overflow (max stack size of '%d')\n", STACK_SIZE);
+		exit(EXIT_FAILURE);
+	}
+
+	stack[++regs[RSP]] = byte;
+	ip += (unsigned long int) INSTR_SIZE;
+}
+
 static void run_bytecode(void)
 {
 	printf("INSTR POINTER: %lu\n FILE SIZE: %lu\n", ip, file_size);
-	while (ip != file_size)
+	while (ip != file_size)	// accomodate if ip points one past 'p_bytes'
 	{
-		uint8_t byte = expect_byte(NULL);
-		printf("HEX BYTE: %X\n", byte);
+		uint8_t byte = p_bytes[ip];
+		printf("HEX BYTE: %.2X\n", byte);
 		switch (byte)
 		{
 			case MOVRR: op_movrr(); break;
+			case PUSHV: op_pushv(); break; 
 			case JMPFV: op_jmpfv(); break;
+			case JMPBV: op_jmpbv(); break;
 		}
 	}
 }
