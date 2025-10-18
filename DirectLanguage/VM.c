@@ -23,54 +23,58 @@
 enum OPCODE
 {
 // MOV REG
-	MOVRR = 0,
-	MOVRV = 1,
-	MOVSR = 2,
-	MOVSV = 3,
+	MOVB1RV = 1,
+	MOVB8RV = 2,
+
+	MOVB1RR = 1,
+	MOVB8RR = 2,
+	
+	MOVB1RS = 3,
+	MOVB8RS = 4,
 
 // MOV STACK
-	MOVB1STV,
-	MOVB1STST,
+	MOVB1SV,
+	MOVB1SS,
 
-	MOVB8STV,
-	MOVB8STST,
+	MOVB8SV,
+	MOVB8SS,
 
 // INC STACK
-	INCB1STV,
-	INCB1STST,
+	INCB1SV,
+	INCB1SS,
 
-	INCB8STV,
-	INCB8STST,
+	INCB8SV,
+	INCB8SS,
 
 // ADD STACK
-	ADDB1STV,		// ADD value to value located on stack address
-	ADDB1STST,
+	ADDB1SV,		// ADD value to value located on stack address
+	ADDB1SS,
 
-	ADDB8STV,
-	ADDB8STST,
+	ADDB8SV,
+	ADDB8SS,
 
 // SUB STACK
-	SUBB1STV,
-	SUBB1STST,
+	SUBB1SV,
+	SUBB1SS,
 
-	SUBB8STV,
-	SUBB8STST,
+	SUBB8SV,
+	SUBB8SS,
 
 // DEC STACK
-	DECB1STV,
-	DECB1STST,
+	DECB1SV,
+	DECB1SS,
 
-	DECB8STV,
-	DECB8STST,
+	DECB8SV,
+	DECB8SS,
 
 // PUSH
 	PUSHB1V,
-	PUSHB1ST,
+	PUSHB1S,
 	POPB1R,
+	POPB8R,
 
 	PUSHB8V,
-	PUSHB8ST,
-	POPB8R,	
+	PUSHB8S,
 
 // UNCONDITIONAL JMP
 	JMPFV,	// JMP forwards of literal offset count
@@ -79,7 +83,7 @@ enum OPCODE
 
 // CMP
 	CMPRV,
-	CMPSTV,
+	CMPSV,
 
 // CONDITIONAL FORWARD JMP
 	JEFV,
@@ -117,7 +121,7 @@ enum REG
 	RSP,
 };
 
-long int regs[] = {
+int64_t regs[] = {
 	[RAX] = 0,
 	[RBP] = 0,
 	[RSP] = -1,
@@ -129,16 +133,22 @@ static unsigned long int ip = 0;	// although this is implicitly initialized to 0
 static unsigned long int file_size;
 static uint8_t *p_bytes;
 
-static uint8_t expect_byte(const char *err_msg)
+
+static inline uint8_t expect_byte(const char *err_msg, long int p_bytes_index)
 {
-	if (ip == file_size)
+	if (ip >= file_size)
 	{
 		if (err_msg != NULL)
 			fprintf(stderr, "%s\n", err_msg);
 		exit(EXIT_FAILURE);
 	}
-	return p_bytes[ip];
+	return p_bytes[p_bytes_index];
 }
+
+#define expect_bytes(p_bytes_index, err_msg_format, ...) \
+	(ip >= file_size) ? \
+		(fprintf(stderr, "%s\n", err_msg_format, __VA_ARGS__), exit(EXIT_FAILURE)) : \
+		(p_bytes + p_bytes_index) \
 
 static void stack_push(uint8_t byte)
 {
@@ -151,27 +161,71 @@ static void stack_push(uint8_t byte)
 	stack[++regs[RSP]] = byte;
 }
 
-// wait.. why did i make this again?
-static void op_movrr(void)
+static void stack_pushn(uint8_t *bytes, int count)
 {
-	// uint8_t	reg_reg = expect_byte("Expected source reg for instr 'movrr'");
-	// uint8_t	reg_dest = expect_byte("Expected destination reg for instr 'movrr'");
-	
-}
-
-static void op_pushvi64(void)
-{
-	static char err_msg[] = "Expected byte %d for instr 'pushvi'";
-	static const size_t err_msg_size = sizeof err_msg;
-
-	for (int i = 0; i < INT64_SIZE; i++)
+	if (regs[RSP] == STACK_SIZE - count)
 	{
-		snprintf(err_msg, err_msg_size, "Expected byte %d for integer literal for instr 'pushvi'", i + 1);
-		uint8_t byte = expect_byte(err_msg);
-		stack_push(byte);
+		fprintf(stderr, "VM stack overflow\n");
+		exit(EXIT_FAILURE);
 	}
+
+	regs[RSP] += count;
+	memcpy((stack + ip) + 1, bytes, count);
 }
 
+static void op_movb1rv(void)
+{
+	static const int INSTR_SIZE = 3;
+	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movb1rv'", ip + 1);
+	regs[reg_dest] = expect_byte("Expected '1' byte for instr 'movb1rv'", ip + 2);
+	ip += INSTR_SIZE;
+}
+
+static void op_movb1rr(void)
+{
+	static const int INSTR_SIZE = 3;
+	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movb1rr'", ip + 1);
+	uint8_t	reg_src = expect_byte("Expected src reg for instr 'movb1rr'", ip + 1);
+
+	// error handle lol
+	regs[reg_dest] = regs[reg_src] & 0xFF00000000000000;
+	ip += INSTR_SIZE;
+}
+
+static void op_movb1rst(void)
+{
+	static const int INSTR_SIZE = 3;
+	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movrr'", ip + 1);
+	uint8_t	reg_src = expect_byte("Expected src reg for instr 'movrr'", ip + 1);
+
+	// error handle lol
+	regs[reg_dest] = regs[reg_src] & 0xFF00000000000000;
+	ip += INSTR_SIZE;
+}
+
+static void op_pushvb1(void)
+{
+	static const int INSTR_SIZE = 2;
+	uint8_t byte = expect_byte("Expected '1' byte for instr 'pushvb1'", ip + 1);
+	stack_push(byte);
+	ip += INSTR_SIZE;
+}
+
+static void op_pushvb8(void)
+{
+	static const int INSTR_SIZE = 9;
+	if (file_size - (ip + 1) < 8)
+	{
+		fprintf(stderr, "Expected '8' bytes for instr 'pushvb8', instead got '%d' bytes",
+			(int) (file_size - (ip + 1)));
+	}
+
+	uint8_t *bytes = (p_bytes + ip) + 1;
+	stack_pushn(bytes, 8);
+	ip += INSTR_SIZE;
+}
+
+// Jumps have no need to increment ip by their instr size since the point is to jump to a specified valid offset
 static void op_jmpfv(void)
 {
 	if (file_size - (ip + 1) < 4)
@@ -238,7 +292,6 @@ static void op_jmpfr(void)
 
 static void op_jmpbv(void)
 {
-	printf("asdsadda\n");
 	if (file_size - (ip + 1) < 4)
 	{
 		fprintf(stderr,
@@ -301,7 +354,7 @@ static void run_bytecode(void)
 		printf("HEX BYTE: %.2X\n", byte);
 		switch (byte)
 		{
-			case MOVRR: op_movrr(); break;
+			case MOVB1RV: op_movb1rv(); break;
 			case JMPFV: op_jmpfv(); break;
 			case JMPBV: op_jmpbv(); break;
 		}
