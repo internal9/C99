@@ -133,7 +133,6 @@ static unsigned long int ip = 0;	// although this is implicitly initialized to 0
 static unsigned long int file_size;
 static uint8_t *p_bytecode;
 
-
 static inline uint8_t expect_byte(const char *err_msg, unsigned long int p_bytes_index)
 {
 	if (ip >= file_size)
@@ -203,7 +202,18 @@ static void op_movb1rr(void)
 	ip += (unsigned long int) INSTR_SIZE;
 }
 
-static void op_movb1rst(void)
+static void op_movb8rr(void)
+{
+	static const int INSTR_SIZE = 3;
+	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movb8rr'", ip + 1);
+	uint8_t	reg_src = expect_byte("Expected src reg for instr 'mov8rr'", ip + 1);
+
+	// error handle lol
+	regs[reg_dest] = regs[reg_src];
+	ip += (unsigned long int) INSTR_SIZE;
+}
+
+static void op_movb1rs(void)
 {
 	static const int INSTR_SIZE = 3;
 	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movrr'", ip + 1);
@@ -211,6 +221,17 @@ static void op_movb1rst(void)
 
 	// error handle lol
 	regs[reg_dest] = regs[reg_src] & (int64_t) 0xFF00000000000000;
+	ip += (unsigned long int) INSTR_SIZE;
+}
+
+static void op_movb8rs(void)
+{
+	static const int INSTR_SIZE = 10;
+	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movrr'", ip + 1);
+	uint8_t	reg_src = expect_byte("Expected src reg for instr 'movrr'", ip + 1);
+
+	// error handle lol
+	regs[reg_dest] = regs[reg_src];
 	ip += (unsigned long int) INSTR_SIZE;
 }
 
