@@ -5,9 +5,9 @@
 #include <limits.h>
 #include <errno.h>
 
+#define ERREXIT(...) (fprintf(stderr, __VA_ARGS__), exit(EXIT_FAILURE))
 #define INT64_SIZE 8
 #define STACK_SIZE 512	// i sure do love arbitrary numbers
-
 /*
 	TODO:
 	* debugging info for specific lines and positions
@@ -197,7 +197,7 @@ static void op_movb8rv(void)
 	ip += (unsigned long int) INSTR_SIZE;
 }
 
-static enum REG expect_reg_byte(void)
+static inline enum REG expect_reg(void)
 {
 	uint8_t byte = expect_byte("Expected byte for retrieving reg\n", ip + 1);
 	if (byte > LAST_REG)
@@ -215,46 +215,33 @@ static int64_t get_stack_addr(void)
 	int64_t addr;
 
 	// endianness doesn't matter in registers
-	uint8_t addr_info_byte = expect_byte();
+	uint8_t addr_info_byte = expect_byte("Expected byte for stack addressing info\n", ip + 1);
 
-	int base_mode = info_byte & 0x03;	// 0b00000011
+	int base_mode = addr_info_byte & 0x03;	// 0b00000011
+	if (base_mode == 0x00)
+	   	ERREXIT("Base mode for stack addressing cannot be '0'\n");
+
 	if (base_mode == 0x01)	// literal
 	{
 		const uint8_t *p_bytes = expect_bytes(4,
 			"Expected '4' bytes for literal base value, instead got '%d' bytes\n",
-			((file_size - 1) - ip);
+			(int) ((file_size - 1) - ip));
 		memcpy(&addr, p_bytes, (size_t) 4);
 	}
 	else if (base_mode == 0x02)	// reg
 	{
-		
+		enum REG reg = expect_reg();
+		addr = regs[reg];
 	}
 
-	int index_mode = info_byte & 0x0C;	// 0b00001100
-	int scale_mode = info_byte & 0x30	// 0b00110000
-	int displacement_mode = info & 0xC0	// 0b11000000
-	
+	int index_mode = addr_info_byte & 0x0C;	// 0b00001100
+	int scale_mode = addr_info_byte & 0x30;	// 0b00110000
+	int displacement_mode = addr_info_byte & 0xC0;	// 0b11000000
 }
+
 // Introduce stack addressing for instrs like these
 static void op_movrs(void)
 {
-	switch (byte_mode)
-	{
-		case 0:	// [reg]
-		case 1: // [reg] + literal
-		case 2: // [reg] + reg
-		case 3: // [reg * literal]
-		case 4: // [reg * literal]
-		case 5: // [reg * reg]
-		case 1: // [reg*literal]
-		case 2: // [reg*reg]
-		case 3: // [reg*literal] + literal
-		case 4: // [reg*reg] + literal
-		case 5: // [reg*literal] + literal
-		case 6: // [reg*reg] + reg
-		case 7: // 
-	}
-
 	static const int INSTR_SIZE = 3;
 	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movrr'", ip + 1);
 	uint8_t	reg_src = expect_byte("Expected src reg for instr 'movrr'", ip + 1);
@@ -460,8 +447,7 @@ static void run_bytecode(void)
 		{
 			case MOVB1RV: op_movb1rv(); break;
 			case MOVB8RV: op_movb8rv(); break;
-			case MOVB1RR: op_movb1rr(); break;
-			// case JMPFV: op_jmpfv(); break;
+ 			// JMPFV: op_jmpfv(); break;
 			// case JMPBV: op_jmpbv(); break;
 		}
 	}
