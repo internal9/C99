@@ -21,6 +21,8 @@
 		v: value, such as a literal
 */
 
+typedef unsigned char ubyte_t;
+
 enum OPCODE
 {
 // MOV REG
@@ -137,7 +139,6 @@ static unsigned long int ip = 0;	// although this is implicitly initialized to 0
 static unsigned long int file_size;
 static uint8_t *p_bytecode;
 
-
 static inline uint8_t expect_byte(const char *err_msg, unsigned long int p_bytes_index)
 {
 	if (ip >= file_size)
@@ -149,6 +150,7 @@ static inline uint8_t expect_byte(const char *err_msg, unsigned long int p_bytes
 	return p_bytecode[p_bytes_index];
 }
 
+// i hate this
 #define expect_bytes(p_bytes_index, err_msg_format, ...) \
 	((p_bytes_index >= file_size) ? \
 		(fprintf(stderr, err_msg_format, __VA_ARGS__), exit(EXIT_FAILURE), NULL) : \
@@ -210,14 +212,30 @@ static inline enum REG expect_reg(void)
 	return (enum REG) byte;
 }
 
-static int64_t get_stack_addr(void)
+// just gonna assume a byte is 8 bits
+// base * index * scale + displacement
+static int get_stack_addr(int *addr_info_size)
 {
-	int64_t addr;
+	/*
+		0x00: none
+		0x01: literal
+		0x02: reg
+	*/
+
+	if (*addr_info_size != 0)
+	   ERREXIT("Hey idiot! Initialize 'addr_info_size' to zero,"
+	   	   "unless your ass got lucky and garbage ended up being 0 :)\n");
+  
+	ubyte_t base = 0, index = 0, scale = 1, displacement = 0;
 
 	// endianness doesn't matter in registers
-	uint8_t addr_info_byte = expect_byte("Expected byte for stack addressing info\n", ip + 1);
+	ubyte_t addr_info_byte = expect_byte("Expected byte for stack addressing info\n", ip + 1);
 
 	int base_mode = addr_info_byte & 0x03;	// 0b00000011
+	int index_mode = addr_info_byte & 0x0C;	// 0b00001100
+	int scale_mode = addr_info_byte & 0x30;	// 0b00110000
+	int displacement_mode = addr_info_byte & 0xC0;	// 0b11000000
+
 	if (base_mode == 0x00)
 	   	ERREXIT("Base mode for stack addressing cannot be '0'\n");
 
@@ -226,17 +244,81 @@ static int64_t get_stack_addr(void)
 		const uint8_t *p_bytes = expect_bytes(4,
 			"Expected '4' bytes for literal base value, instead got '%d' bytes\n",
 			(int) ((file_size - 1) - ip));
-		memcpy(&addr, p_bytes, (size_t) 4);
+		memcpy(&base, p_bytes, (size_t) 4);
+		*addr_info_size = 4;
 	}
 	else if (base_mode == 0x02)	// reg
 	{
 		enum REG reg = expect_reg();
-		addr = regs[reg];
+		base = regs[reg];
+		*addr_info_size = 1;
 	}
 
-	int index_mode = addr_info_byte & 0x0C;	// 0b00001100
-	int scale_mode = addr_info_byte & 0x30;	// 0b00110000
-	int displacement_mode = addr_info_byte & 0xC0;	// 0b11000000
+	if (index_mode == 0x01)
+	{
+		const uint8_t *p_bytes = expect_bytes(4,
+			"Expected '4' bytes for literal index value, instead got '%d' bytes\n",
+			(int) ((file_size - 1) - ip));
+		memcpy(&index, p_bytes, (size_t) 4);
+		*addr_info_size += 4;
+	}
+	else if (index_mode == 0x02)
+	{
+		enum REG reg = expect_reg();
+		index = regs[reg];
+		*addr_info_size += 1;
+	}
+
+	if (scale_mode == 0x01)
+	{
+		const uint8_t *p_bytes = expect_bytes(4,
+			"Expected '4' bytes for literal scale value, instead got '%d' bytes\n",
+			(int) ((file_size - 1) - ip));
+		memcpy(&scale, p_bytes, (size_t) 4);
+		*addr_info_size += 4;
+	}
+	else if (scale_mode == 0x02)
+	{
+		enum REG reg = expect_reg();
+		scale = regs[reg];
+		*addr_info_size += 1;
+	}
+
+	if (displacement_mode == 0x01)
+	{
+		const uint8_t *p_bytes = expect_bytes(4,
+			"Expected '4' bytes for literal displacement value, instead got '%d' bytes\n",
+			(int) ((file_size - 1) - ip));
+		memcpy(&displacement, p_bytes, (size_t) 4);
+		*addr_info_size += 4;
+	}
+	else if (displacement_mode == 0x02)
+	{
+		enum REG reg = expect_reg();
+		displacement = regs[reg];
+		*addr_info_size += 1;
+	}
+
+	if (base >= STACK_SIZE)
+	   ERREXIT("Stack addr's base exceeds stack size of '%d'\n", STACK_SIZE);
+
+	if (index >= STACK_SIZE)
+	   ERREXIT("Stack addr's index exceeds stack size of '%d'\n", STACK_SIZE);
+
+	if (index * scale >= STACK_SIZE)
+	   ERREXIT("Stack addr's 'index * scale' exceeds stack size of '%d'\n", STACK_SIZE);
+
+	if (base + index * scale >= STACK_SIZE)
+	   ERREXIT("Stack addr's 'base + index * scale' exceeds stack size of '%d'\n", STACK_SIZE);
+
+	if (displacement >= STACK_SIZE)
+	   ERREXIT("Stack 
+	
+	int stack_addr = (int) (base + index * scale + displacement);
+	if (stack_addr >= STACK_SIZE)
+	   ERREXIT("Stack address of '%d' is greater than max stack size of '%d'\n"m
+	   	stack_addr, STACK_SIZE);
+
 }
 
 // Introduce stack addressing for instrs like these
@@ -249,17 +331,19 @@ static void op_movrs(void)
 	// error handle lol
 	regs[reg_dest] = regs[reg_src] & (int64_t) 0xFF00000000000000;
 	ip += (unsigned long int) INSTR_SIZE;
-}
+}	// REMOVE
 
 static void op_r_movb1rs(void)
 {
-	static const int INSTR_SIZE = 3;
+	static const int BASE_INSTR_SIZE = 3;
+	int addr_info_size;
+
 	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movrr'", ip + 1);
-	uint8_t	reg_src = expect_byte("Expected src reg for instr 'movrr'", ip + 1);
+	int stack_addr = get_stack_addr(&addr_info_size);
 
 	// error handle lol
-	regs[reg_dest] = regs[reg_src] & (int64_t) 0xFF00000000000000;
-	ip += (unsigned long int) INSTR_SIZE;
+	regs[reg_dest] = stack[stack_addr] & (int64_t) 0xFF00000000000000;
+	ip += (unsigned long int) (BASE_INSTR_SIZE + addr_info_size);
 }
 
 static void op_movb8rs(void)
