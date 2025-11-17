@@ -2,522 +2,280 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stddef.h>
+#include <math.h>
 #include <limits.h>
 #include <errno.h>
 
-#define ERREXIT(...) (fprintf(stderr, __VA_ARGS__), exit(EXIT_FAILURE))
-#define INT64_SIZE 8
+#if CHAR_BIT != 8
+	#error "DVM: a byte must be 8 bits for VM operations to work as intended"
+#endif
+
+// 'ERREXIT' & 'PERREXIT' expect *string literals* as the first argument format
+#define ERREXIT(...) (fprintf(stderr, __VA_ARGS__), putc('\n', stderr), exit(EXIT_FAILURE))	// macro 'putc', yeah just don't have expressions wide side effects and you'lll be fine!!!!
+/*
+	Using fprintf to allow for formatting, which perror doesn't, perror appends newline char to stderr
+	errmsg should end with ": " to accomodate for perror msg
+*/
+#define PERREXIT(...) (fprintf(stderr, __VA_ARGS__), fputs(": ", stderr), perror(NULL), exit(errno))
+#define MAX(x, y) (((x) >= (y)) ? (x) : (y))
 #define STACK_SIZE 512	// i sure do love arbitrary numbers
-/*
-	TODO:
-	* debugging info for specific lines and positions
-*/
-
-/*
-	*base_instr_name suffix1 suffix2
-	*suffix2 determines how something will be moved into something specified by suffix1
-	*suffix1 info:
-		r: reg
-		v: value, such as a literal
-*/
-
-typedef unsigned char ubyte_t;
 
 enum OPCODE
 {
-// MOV REG
-	MOVB1RV = 1,
-	MOVB8RV = 2,
+	// memory transfer operations
+	MOVR,	// # bytes used depends on reg used
+	MOVS	// move value into stack address
+	MOVH	// move value into heap address at stack address?
+	TRS,	// transfer to reg from stack
+	TSR,	// transfer to stack from reg
+	TRH,	// transfer to reg from heap address
+	THR,	// transfer to heap address from reg
 
-	MOVB1RR = 1,
-	MOVB8RR = 2,
-	
-	MOVB1RS = 3,
-	MOVB8RS = 4,
+	// arithmetic operations
+	// op [reg]
+	ZERO,
+	INC,
+	DEC,
 
-// MOV STACK
-	MOVB1SV,
-	MOVB1SS,
+	//op reg, [value | freg]
+	ADD,
+	SUB,
+	MUL,
+	DIV,
+	SQRT,
+	POW,
+	LOG,
 
-	MOVB8SV,
-	MOVB8SS,
+	// bitwise operations
+	// op reg, [value | reg]
+	NOT,
+	AND,
+	OR,
+	XOR,
+	BIC,
 
-// tbh might remove
-// INC STACK
-	INCB1SV,
-	INCB1SS,
+	// logical shift (no regard for sign bit)
+	LLSH,
+	LRSH,
 
-	INCB8SV,
-	INCB8SS,
+	// arithmetic shift (sign bit unaffected)
+	ALSH,
+	ARSH,
 
-// ADD STACK
-	ADDB1SV,		// ADD value to value located on stack address
-	ADDB1SS,
+	// stack dedicated operations
+	// op [val | reg]
+	PUSH,
+	FPUSH,
 
-	ADDB8SV,
-	ADDB8SS,
+	// op [reg]
+	POP,
+	FPOP,	// popping into a general register performs double -> u64 conversion
 
-// SUB STACK
-	SUBB1SV,
-	SUBB1SS,
-
-	SUBB8SV,
-	SUBB8SS,
-
-// DEC STACK
-	DECB1SV,
-	DECB1SS,
-
-	DECB8SV,
-	DECB8SS,
-
-// PUSH
-	PUSHB1V,
-	PUSHB1S,
-	POPB1R,
-	POPB8R,
-
-	PUSHB8V,
-	PUSHB8S,
-
-// UNCONDITIONAL JMP
-	JMPFV,	// JMP forwards of literal offset count
-	JMPFR,	// JMP forwards of register value count
-	JMPBV,	// JMP backwards of literal offset count
-
-// CMP
-	CMPRV,
-	CMPSV,
-
-// CONDITIONAL FORWARD JMP
-	JEFV,
-	JNEFV,
-
-	JGFV,
-	JGEFV,
-
-	JLFV,
-	JLEFV,
-
-// CONDITIONAL BACKWARD JMP
-	JEBV,
-	JNEBV,
-
-	JGBV,
-	JGEBV,
-
-	JLBV,
-	JLEBV,
-
-// IDK
-	CALL,	// implement via jmps?
+	// branching operations
+	JMP,
+	JNE,
+	JE,
+	JL,
+	JLE,
+	JG,
+	JGE,
+	CALL,
+	BICALL,	// built-in call
 	RET,
+
+	// dynamic memory operations
+	/*
+		alloc [addr], [bytes] heap-array addr to put memory address of heap-allocated data into
+		has mode bit for zero-initializing newly allocated data IF resizing bigger
+	*/
+	ALLOC,
+	/*
+		realloc [mem_addr], [bytes]
+		mem_addr: addr of the heap-allocated data itself
+	*/
+	REALLOC,
+	/*
+		dealloc [mem_addr]
+		mem_addr: addr of the heap-allocated data itself
+	*/
+	DEALLOC,
+
+	// misc operations
+	CMP,
+};
+
+// should just remove lol
+// Specify size to use for operands that can either be regs or literals, to save bytes ig. Orrr just read a reg
+enum OPERAND_READ_MODE
+{
+	USE_REG,
+	
+	/*
+		If instructions operates on reg or stack location:
+			 They expect sizeof(int64_t) or sizeof(double) amount of bits,
+			 *depending* on if a reg or floating-point reg is being used
+	
+		If instruction can use literals:
+			They expect sizeof(int64_t) or sizeof(double) amount of bits
+			*depending* on instruction
+	*/
+	FULL,
+	HALF,
+	EIGHT
 };
 
 enum REG
-{
-	RAX,
+{	
 	R1,
 	R2,
-	R3,
-	R4,
+	RAX,
 	RBP,
+	PRBP,
 	RSP,
+	FR1,
+	FR2,
 };
 
-int64_t regs[] = {
-	[RAX] = 0,
+#define ASSERT_IS_REG(int_val, err_msg) ((int_val > FR2) ? (ERREXIT(err_msg), 0) : int_val)	// yeah idk about this
+#define IS_I64_REG(int_val, err_msg) ((int_val >= R1 && int_val <= PRBP) ? (ERREXIT(err_msg), 0) : int_val)
+#define IS_FP_REG(int_val, err_msg) ((int_val == FR1 || int_val == FR2) ? (ERREXIT(err_msg), 0) : int_val)
+
+int64_t i64_regs[] = {
+	[R1] = 0,
+	[R2] = 0,
+	[RAX] = 0,	
 	[RBP] = 0,
+	[PRBP] = 0,
 	[RSP] = -1,
 };
 
-#define LAST_REG RSP
+double fp_regs[] = {
+	[FR1] = 0,
+	[FR2] = 0,
+};
+
+const int I_LITERAL_SIZES[] = {
+	[FULL] = 8,
+	[HALF] = 4,
+	[EIGHT] = 1,
+};
+
+// C Standard: floating-point size varies
+const int F_LITERAL_SIZES[] = {
+	[FULL] = sizeof(double),
+	[HALF] = MAX(sizeof(double) / 2, 1),
+	[EIGHT] = MAX(sizeof(double) / 8, 1)
+};
 
 static uint8_t stack[STACK_SIZE]; // full stack implementation, 'ip' points to most recently pushed byte
 
-static unsigned long int ip = 0;	// although this is implicitly initialized to 0, doing so explicitly is good practice
-static unsigned long int file_size;
+static unsigned long ip = 0;	// although this is implicitly initialized to 0, doing so explicitly is good practice
+static unsigned long file_size;
 static uint8_t *p_bytecode;
 
-static inline uint8_t expect_byte(const char *err_msg, unsigned long int p_bytes_index)
+// Util
+#define FP_TO_I64_MAX ((double) (INT64_MAX - 100000))	// random arbitrary value cuz floating-point conversion errors are scary!!!
+#define FP_TO_I64_MIN ((double) (INT64_MIN + 100000))
+
+static inline int64_t try_cast_fp_to_i64(double fp_val)
 {
-	if (ip >= file_size)
-	{
-		if (err_msg != NULL)
-			fprintf(stderr, "%s\n", err_msg);
-		exit(EXIT_FAILURE);
-	}
+	if (fp_val < FP_TO_I64_MIN || fp_val > FP_TO_I64_MAX || isnan(fp_val) || isinf(fp_val))
+		ERREXIT("Could not cast floating-point of value '%f' to 64-bit signed integer", fp_val);
+
+	return (int64_t) fp_val;
+}
+
+// Stuff
+static inline uint8_t expect_byte(unsigned long int p_bytes_index, const char *err_msg)
+{
+	// max 'p_bytecode' index = file_size - 1
+	if (p_bytes_index >= file_size)
+		ERREXIT(err_msg);
 	return p_bytecode[p_bytes_index];
 }
 
-// i hate this
-#define expect_bytes(p_bytes_index, err_msg_format, ...) \
-	((p_bytes_index >= file_size) ? \
-		(fprintf(stderr, err_msg_format, __VA_ARGS__), exit(EXIT_FAILURE), NULL) : \
-		(p_bytecode + p_bytes_index)) \
+// should bound check 'count'
+static inline uint8_t *expect_bytes(unsigned long int p_bytes_index, int count, const char *err_msg)	// mainly just checks if specified amount of bytes exist, not literally allocate, idk
+{
+	if (count < 2)
+		ERREXIT("expect_bytes: Expected 'count' >= 2");
+	
+	if ((p_bytes_index + count - 1) >= file_size)
+		ERREXIT(err_msg, count, (unsigned long) (p_bytes_index - (file_size - 1)));	// 3rd arg for insufficient byte count that 'err_msg' must log
+	return p_bytecode + p_bytes_index;
+}
 
-// static void stack_get(int64_t
+/*
+static inline enum REG_SPEC expect_reg_spec(unsigned long int p_bytes_index, const char *err_msg)
+{
+	unsigned int byte = expect_byte(p_bytes_index, err_msg);	// scared of usual arithmetic conversion misinterpreting as negative values
+	if (byte > LAST_REG_SPEC)
+		ERREXIT(err_msg, byte);	// 'err_msg' must handle byte value
+	return (enum REG_SPEC) byte;
+}
+*/
+
+// surprised memcpy doesn't take a char pointer
+static inline void expect_bytes_memcpy(void *dest, unsigned long int p_bytes_index, int count, const char *err_msg)
+{
+		uint8_t *src_literal_bytes = expect_bytes(ip, count, err_msg);	// one again, 'long' for insufficient byte count that 'err_msg' must log
+		memcpy(dest, src_literal_bytes, count);
+}
+
+// might just change these into opcode funcs
 static void stack_push(uint8_t byte)
 {
-	if (regs[RSP] == STACK_SIZE - 1)
-	{
-		fprintf(stderr, "VM stack overflow\n");
-		exit(EXIT_FAILURE);
-	}
+	if (i64_regs[RSP] == STACK_SIZE - 1)
+		ERREXIT("VM stack overflow\n");
 
-	stack[++regs[RSP]] = byte;
+	stack[++i64_regs[RSP]] = byte;
 }
 
 static void stack_pushn(uint8_t *p_bytes, int count)
 {
-	if (regs[RSP] == STACK_SIZE - count)
-	{
-		fprintf(stderr, "VM stack overflow\n");
-		exit(EXIT_FAILURE);
-	}
+	if (i64_regs[RSP] == STACK_SIZE - count)
+		ERREXIT("VM stack overflow\n");
 
-	regs[RSP] += count;
+	i64_regs[RSP] += count;
 	memcpy((stack + ip) + 1, p_bytes, (size_t) count);
 }
 
-static void op_movb1rv(void)
+// instrs
+static void op_movr(enum OPERAND_READ_MODE operand_2_read_mode)
 {
-	static const int INSTR_SIZE = 3;
-	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movb1rv'", ip + 1);
-	regs[reg_dest] = expect_byte("Expected '1' byte for instr 'movb1rv'", ip + 2);
-	ip += (unsigned long int) INSTR_SIZE;
-}
+	// Max of 16 registers can be represented, only 8 exist so far
+	uint8_t info_byte = expect_byte();
+	enum REG dest_reg = ASSERT_IS_REG(info_byte & 0xF0);		// 0xF0 = 0b11110000, 16 possible registers that can be implemented
 
-static void op_movb8rv(void)
-{
-	static const int INSTR_SIZE = 10;
-	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movb8rv'", ip + 1);
-	uint8_t *p_bytes = expect_bytes(8,
-		"Expected '8' bytes for instr 'movb8rv', %d\n",
-		(int) (file_size - (ip + 1)));
-	memcpy(regs + reg_dest, p_bytes, 8);
-	ip += (unsigned long int) INSTR_SIZE;
-}
-
-static inline enum REG expect_reg(void)
-{
-	uint8_t byte = expect_byte("Expected byte for retrieving reg\n", ip + 1);
-	if (byte > LAST_REG)
+	if (operand_2_read_mode == USE_REG)
 	{
-		fprintf(stderr,
-			"Reg byte has value of %d which corrosponds to no register\n", byte);
-		exit(EXIT_FAILURE);
+		enum REG src_reg = ASSERT_IS_REG(info_byte & 0x0F);		// 0xF0 = 0b00001111
+		if (IS_I64_REG(dest_reg))
+			// ADD RANGE CASTING!!!! since double is being converted to int64_t
+			i64_regs[dest_reg] = IS_64_REG(src_reg) ? i64_regs[src_reg] : try_cast_fp_to_i64(fp_regs[src_reg]);
+		else
+			fp_regs[dest_reg] = IS_64_REG(src_reg) ? (double) i64_regs[src_reg] : fp_regs[src_reg];
 	}
-
-	return (enum REG) byte;
-}
-
-// just gonna assume a byte is 8 bits
-// base * index * scale + displacement
-static int get_stack_addr(int *addr_info_size)
-{
-	/*
-		0x00: none
-		0x01: literal
-		0x02: reg
-	*/
-
-	if (*addr_info_size != 0)
-	   ERREXIT("Hey idiot! Initialize 'addr_info_size' to zero,"
-	   	   "unless your ass got lucky and garbage ended up being 0 :)\n");
-  
-	ubyte_t base = 0, index = 0, scale = 1, displacement = 0;
-
-	// endianness doesn't matter in registers
-	ubyte_t addr_info_byte = expect_byte("Expected byte for stack addressing info\n", ip + 1);
-
-	int base_mode = addr_info_byte & 0x03;	// 0b00000011
-	int index_mode = addr_info_byte & 0x0C;	// 0b00001100
-	int scale_mode = addr_info_byte & 0x30;	// 0b00110000
-	int displacement_mode = addr_info_byte & 0xC0;	// 0b11000000
-
-	if (base_mode == 0x00)
-	   	ERREXIT("Base mode for stack addressing cannot be '0'\n");
-
-	if (base_mode == 0x01)	// literal
+	else	// literal size specification
 	{
-		const uint8_t *p_bytes = expect_bytes(4,
-			"Expected '4' bytes for literal base value, instead got '%d' bytes\n",
-			(int) ((file_size - 1) - ip));
-		memcpy(&base, p_bytes, (size_t) 4);
-		*addr_info_size = 4;
+		int literal_type_size;
+
+		if (IS_I64_REG(dest_reg))
+		{
+			int64_t src_literal;
+			literal_type_size = I_LITERAL_SIZES[operand_2_read_mode];
+			expect_bytes_memcpy(&src_literal, ip, literal_type_size, "some err msg lmaoooo");
+			i64_regs[dest_reg] = src_literal;
+		}
+		else
+		{
+			double src_literal;
+			literal_type_size = FP_LITERAL_SIZES[operand_2_read_mode];
+			expect_bytes_memcpy(&src_literal, ip, literal_type_size, "some err msg lmaoooo");
+			fp_regs[dest_reg] = src_literal;
+		}
 	}
-	else if (base_mode == 0x02)	// reg
-	{
-		enum REG reg = expect_reg();
-		base = regs[reg];
-		*addr_info_size = 1;
-	}
-
-	if (index_mode == 0x01)
-	{
-		const uint8_t *p_bytes = expect_bytes(4,
-			"Expected '4' bytes for literal index value, instead got '%d' bytes\n",
-			(int) ((file_size - 1) - ip));
-		memcpy(&index, p_bytes, (size_t) 4);
-		*addr_info_size += 4;
-	}
-	else if (index_mode == 0x02)
-	{
-		enum REG reg = expect_reg();
-		index = regs[reg];
-		*addr_info_size += 1;
-	}
-
-	if (scale_mode == 0x01)
-	{
-		const uint8_t *p_bytes = expect_bytes(4,
-			"Expected '4' bytes for literal scale value, instead got '%d' bytes\n",
-			(int) ((file_size - 1) - ip));
-		memcpy(&scale, p_bytes, (size_t) 4);
-		*addr_info_size += 4;
-	}
-	else if (scale_mode == 0x02)
-	{
-		enum REG reg = expect_reg();
-		scale = regs[reg];
-		*addr_info_size += 1;
-	}
-
-	if (displacement_mode == 0x01)
-	{
-		const uint8_t *p_bytes = expect_bytes(4,
-			"Expected '4' bytes for literal displacement value, instead got '%d' bytes\n",
-			(int) ((file_size - 1) - ip));
-		memcpy(&displacement, p_bytes, (size_t) 4);
-		*addr_info_size += 4;
-	}
-	else if (displacement_mode == 0x02)
-	{
-		enum REG reg = expect_reg();
-		displacement = regs[reg];
-		*addr_info_size += 1;
-	}
-
-	if (base >= STACK_SIZE)
-	   ERREXIT("Stack addr's base exceeds stack size of '%d'\n", STACK_SIZE);
-
-	if (index >= STACK_SIZE)
-	   ERREXIT("Stack addr's index exceeds stack size of '%d'\n", STACK_SIZE);
-
-	if (index * scale >= STACK_SIZE)
-	   ERREXIT("Stack addr's 'index * scale' exceeds stack size of '%d'\n", STACK_SIZE);
-
-	if (base + index * scale >= STACK_SIZE)
-	   ERREXIT("Stack addr's 'base + index * scale' exceeds stack size of '%d'\n", STACK_SIZE);
-
-	if (displacement >= STACK_SIZE)
-	   ERREXIT("Stack 
-	
-	int stack_addr = (int) (base + index * scale + displacement);
-	if (stack_addr >= STACK_SIZE)
-	   ERREXIT("Stack address of '%d' is greater than max stack size of '%d'\n"m
-	   	stack_addr, STACK_SIZE);
-
-}
-
-// Introduce stack addressing for instrs like these
-static void op_movrs(void)
-{
-	static const int INSTR_SIZE = 3;
-	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movrr'", ip + 1);
-	uint8_t	reg_src = expect_byte("Expected src reg for instr 'movrr'", ip + 1);
-
-	// error handle lol
-	regs[reg_dest] = regs[reg_src] & (int64_t) 0xFF00000000000000;
-	ip += (unsigned long int) INSTR_SIZE;
-}	// REMOVE
-
-static void op_r_movb1rs(void)
-{
-	static const int BASE_INSTR_SIZE = 3;
-	int addr_info_size;
-
-	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movrr'", ip + 1);
-	int stack_addr = get_stack_addr(&addr_info_size);
-
-	// error handle lol
-	regs[reg_dest] = stack[stack_addr] & (int64_t) 0xFF00000000000000;
-	ip += (unsigned long int) (BASE_INSTR_SIZE + addr_info_size);
-}
-
-static void op_movb8rs(void)
-{
-	static const int INSTR_SIZE = 10;
-	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movb8rs'", ip + 1);
-	uint8_t	reg_src = expect_byte("Expected src reg for instr 'movb8rs'", ip + 1);
-
-	// error handle lol
-	regs[reg_dest] = regs[reg_src];
-	ip += (unsigned long int) INSTR_SIZE;
-}
-
-static void op_movb1rr(void)
-{
-	static const int INSTR_SIZE = 3;
-	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movb1rr'", ip + 1);
-	uint8_t	reg_src = expect_byte("Expected src reg for instr 'movb1rr'", ip + 1);
-
-	// error handle lol
-	regs[reg_dest] = regs[reg_src] & (int64_t) 0xFF00000000000000;
-	ip += (unsigned long int) INSTR_SIZE;
-}
-
-static void op_movb8rr(void)
-{
-	static const int INSTR_SIZE = 3;
-	uint8_t	reg_dest = expect_byte("Expected dest reg for instr 'movb8rr'", ip + 1);
-	uint8_t	reg_src = expect_byte("Expected src reg for instr 'movb8rr'", ip + 1);
-
-	// error handle lol
-	regs[reg_dest] = regs[reg_src];
-	ip += (unsigned long int) INSTR_SIZE;
-}
-
-static void op_pushvb1(void)
-{
-	static const int INSTR_SIZE = 2;
-	uint8_t byte = expect_byte("Expected '1' byte for instr 'pushvb1'", ip + 1);
-	stack_push(byte);
-	ip += (unsigned long int) INSTR_SIZE;
-}
-
-static void op_pushvb8(void)
-{
-	static const int INSTR_SIZE = 9;
-	/* if (file_size - (ip + 1) < 8)
-	{
-		fprintf(stderr, "Expected '8' bytes for instr 'pushvb8', instead got '%d' bytes",
-			(int) (file_size - (ip + 1)));
-	}
-	uint8_t *bytes = (p_bytes + ip) + 1; */
-
-	uint8_t *p_bytes =
-		expect_bytes((ip + 1) + 8, "Expected '8' bytes for instr 'pushvb8', instead got '%d' bytes",
-		(int) (file_size - (ip + 1)));
-
-	stack_pushn(p_bytes, 8);
-	ip += (unsigned long int) INSTR_SIZE;
-}
-
-// Jumps have no need to increment ip by their instr size since the point is to jump to a specified valid offset
-static void op_jmpfv(void)
-{
-	/* if (file_size - (ip + 1) < 4)
-	{
-		fprintf(stderr,
-			"Expected 4-byte unsigned integer for offset for instr 'jmpfv', instead got %d bytes\n",
-			(int) (file_size - (ip + 1)));
-		exit(EXIT_FAILURE);
-	} */
-
-	/*
-		!!! THIS ASSUMES THAT INTS ARE STORED IN LITTLE ENDIAN IN THE BYTECODE FILE!!!
-		(LSB stored at lowest mem addr) (might add big endian support via conditional compilation)
-	*/
-	int offset; // should offset bet a long instead?
-	memcpy(&offset, p_bytecode + ip + 1, (size_t) 4);	// '+ 1' so ip points to first byte
-
-	if (offset == 0)
-	{
-		fprintf(stderr, "Jump offset cannot be '0'\n");
-		exit(EXIT_FAILURE);		
-	}
-
-	if (offset < 5)
-	{
-		fprintf(stderr, "Offset of '%d' for instr 'jmpfv' is less than 5 and"
-			" would've jumped to byte part of offset integer\n", offset);
-		exit(EXIT_FAILURE);
-	}
-
-	if (ip > ULONG_MAX - (unsigned long int) offset)
-	{
-		fprintf(stderr, "Offset of '%d' for instr 'jmpfv' will cause overflow" 
-			"for instruction pointer\n", offset);
-		exit(EXIT_FAILURE);
-	}
-	
-	ip += (unsigned long int) offset;
-	if (ip > file_size - 1)
-	{
-		fprintf(stderr, "Instruction pointer has value of '%lu' after adding offset"
-			" of '%d' for instr 'jmpfv' which is greater than the last byte offset of %lu\n",
-			ip, offset, file_size - 1);
-		exit(EXIT_FAILURE);
-	}
-
-	printf("BYTE POST JUMP: %X\n", p_bytecode[ip]);
-}
-
-static void op_jmpfr(void)
-{
-	
-}
-
-
-static void op_jmpbv(void)
-{
-/*	if (file_size - (ip + 1) < 4)
-	{
-		fprintf(stderr,
-			"Expected 4-byte integer for offset for instr 'jmpbv', instead got %d bytes\n",
-			(int) (file_size - (ip + 1)));
-		exit(EXIT_FAILURE);
-	} */
-
-	uint8_t *p_offset_int = expect_bytes((ip + 1) + 4,
-		"Expected 4-byte integer for instr 'jmpbv', instead got %d bytes\n",
-		(int) (file_size - (ip + 1)));
-
-	int offset; // should offset bet a long instead?
-	memcpy(&offset, p_offset_int, (size_t) 4);
-
-	if (offset == 0)
-	{
-		fprintf(stderr, "Jump offset cannot be '0'\n");
-		exit(EXIT_FAILURE);		
-	}
-
-	if (ip < (unsigned long int) offset)
-	{
-		fprintf(stderr, "Offset of '%d' for instr 'jmpbv' will cause underflow for instruction pointer\n", offset);
-		exit(EXIT_FAILURE);
-	}	
-
-	ip -= (unsigned long int) offset;
-}
-
-static void op_jmpbr(void)
-{
-	
-}
-
-static void op_pushv(void)
-{
-	static const int INSTR_SIZE = 2;
-
-	if (ip == file_size - 1)	// 'ip' currently points to the 'pushv' byte
-	{
-		fprintf(stderr, "Expected '1' byte for instr 'pushv', got '0' bytes instead\n");
-		exit(EXIT_FAILURE);
-	}
-
-	printf("IP V SIZE: %lu %lu\n", ip, file_size);
-	uint8_t byte = p_bytecode[ip + 1];
-	if (regs[RSP] == STACK_SIZE - 1)
-	{
-		fprintf(stderr, "VM stack overflow (max stack size of '%d')\n", STACK_SIZE);
-		exit(EXIT_FAILURE);
-	}
-
-	stack[++regs[RSP]] = byte;
-	ip += (unsigned long int) INSTR_SIZE;
 }
 
 static void run_bytecode(void)
@@ -526,13 +284,13 @@ static void run_bytecode(void)
 	while (ip != file_size)	// accomodate if ip points one past 'p_bytes'
 	{
 		uint8_t byte = p_bytecode[ip];
+		int opcode = byte & 0x3F	// 0b00111111
+		int operand_read_mode = byte & 0xFC	// 0b11000000
 		printf("HEX BYTE: %.2X\n", byte);
-		switch (byte)
+	
+		switch (opcode)
 		{
-			case MOVB1RV: op_movb1rv(); break;
-			case MOVB8RV: op_movb8rv(); break;
- 			// JMPFV: op_jmpfv(); break;
-			// case JMPBV: op_jmpbv(); break;
+			case MOVR: op_movr(operand_read_mode); break;
 		}
 	}
 }
@@ -540,62 +298,51 @@ static void run_bytecode(void)
 static void init_bytecode(FILE *p_bytecode_file)
 {
 	if (fseek(p_bytecode_file, 0, SEEK_END) != 0)
-	{
-		perror("Failed to read bytecode file");
-		exit(errno);
-	}
+		PERREXIT("Failed to read bytecode file: ");
 
-	long int ftell_result = ftell(p_bytecode_file);
+	long ftell_result = ftell(p_bytecode_file);
 	if (ftell_result == -1L)
-	{
-		perror("Failed to read bytecode file");	// Especially file size that caused an overflow
-		exit(errno);
-	}
+		PERREXIT("Failed to read bytecode file: ");	// Especially file size that caused an overflow
 
-	file_size = (unsigned long int) ftell_result;	// i hate this
+	file_size = (unsigned long) ftell_result;	// i hate this
 
-	if (file_size == (long int) 0)
+	if (file_size == (long) 0)
 		return;
 
 	if (fseek(p_bytecode_file, 0, SEEK_SET) != 0)	// heard setting it to start is safe, i'm paranoid tho
-	{
-		perror("Failed to read bytecode file");
-		exit(errno);
-	}
+		PERREXIT("Failed to read bytecode file: ");
 
 	p_bytecode = malloc((size_t) file_size); // I would use a VLA but I can't gracefully handle those errors if a stack overflow happens
-	if (p_bytecode == NULL)
-	{
-		perror("Failed to read bytecode file");
-		exit(errno);
-	}
+		PERREXIT("Failed to read bytecode file: ");
 
 	// assuming bytecode files don't have an EOF indicator (Linux)
 	if (fread(p_bytecode, 1, (size_t) file_size, p_bytecode_file) != (size_t) file_size)	// if only file_size was size_t instead of long..
-	{
-		perror("Failed to read bytecode file");
-		exit(errno);
-	}
+		PERREXIT("Failed to read bytecode file: ");
 	
+	// debug
 	printf("Bytecode file size: %lu\n", file_size);
 }
 
 int main(int argc, char *argv[])
 {
 	if (argc != 2)
+		ERREXIT("Expected only one argument, either -i (print info), or a bytecode file\n");
+
+	if (strcmp(argv[1], "-i"))
 	{
-		fprintf(stderr, "Expected one bytecode file to run.\n");	// FUN FACT: stderr is typically unbuffered, it prints immediately due to the importance of warning and error messages!
-		return EXIT_FAILURE;
+		printf("Some useful info:\n"
+			"sizeof(double): %zu\n"
+			"sizeof(int64_t): %zu\n",
+			"sizeof(void*): %zu\n",
+			sizeof(double), sizeof(int64_t), sizeof(void*));
+		return EXIT_SUCCESS;
 	}
+	// FUN FACT: stderr is typically unbuffered, it prints immediately due to the importance of warning and error messages!
 
 	const char *file_name = argv[1];
 	FILE *p_bytecode_file = fopen(file_name, "rb");
 	if (p_bytecode_file == NULL)	// FUN FACT: NULL is implementation-defined, it could be integer literal 0 or (void*) 0, either way it always behaves consitently
-	{
-		fprintf(stderr, "Failed to open file '%s': ", file_name);
-		perror(NULL);
-		return errno;
-	}
+		PERREXIT("Failed to open file '%s': ", file_name);
 
 	init_bytecode(p_bytecode_file);
 	run_bytecode();
