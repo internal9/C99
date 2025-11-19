@@ -25,8 +25,8 @@ enum OPCODE
 {
 	// memory transfer operations
 	MOVR,	// # bytes used depends on reg used
-	MOVS	// move value into stack address
-	MOVH	// move value into heap address at stack address?
+	MOVS,	// move value into stack address
+	MOVH,	// move value into heap address at stack address?
 	TRS,	// transfer to reg from stack
 	TSR,	// transfer to stack from reg
 	TRH,	// transfer to reg from heap address
@@ -137,9 +137,13 @@ enum REG
 	FR2,
 };
 
-#define ASSERT_IS_REG(int_val, err_msg) ((int_val > FR2) ? (ERREXIT(err_msg), 0) : int_val)	// yeah idk about this
-#define IS_I64_REG(int_val, err_msg) ((int_val >= R1 && int_val <= PRBP) ? (ERREXIT(err_msg), 0) : int_val)
-#define IS_FP_REG(int_val, err_msg) ((int_val == FR1 || int_val == FR2) ? (ERREXIT(err_msg), 0) : int_val)
+
+#define IS_I64_REG(int_val) ((int_val) >= R1 && (int_val) <= PRBP)
+#define IS_FP_REG(int_val) ((int_val) == FR1 || (int_val) == FR2)
+
+// variadic args are error msg format and args
+#define ASSERT_IS_FP_REG(int_val, ...) (IS_FP_REG(int_val) ? (int_val) : (ERREXIT(__VA_ARGS__), 0)
+#define ASSERT_IS_REG(int_val, ...) ((int_val) >= R1 && (int_val) <= FR2 ? (int_val) : (ERREXIT(__VA_ARGS__), 0))	// yeah idk about this
 
 int64_t i64_regs[] = {
 	[R1] = 0,
@@ -162,7 +166,7 @@ const int I_LITERAL_SIZES[] = {
 };
 
 // C Standard: floating-point size varies
-const int F_LITERAL_SIZES[] = {
+const int FP_LITERAL_SIZES[] = {
 	[FULL] = sizeof(double),
 	[HALF] = MAX(sizeof(double) / 2, 1),
 	[EIGHT] = MAX(sizeof(double) / 8, 1)
@@ -187,7 +191,7 @@ static inline int64_t try_cast_fp_to_i64(double fp_val)
 }
 
 // Stuff
-static inline uint8_t expect_byte(unsigned long int p_bytes_index, const char *err_msg)
+static inline uint8_t expect_byte(unsigned long p_bytes_index, const char *err_msg)
 {
 	// max 'p_bytecode' index = file_size - 1
 	if (p_bytes_index >= file_size)
@@ -196,31 +200,21 @@ static inline uint8_t expect_byte(unsigned long int p_bytes_index, const char *e
 }
 
 // should bound check 'count'
-static inline uint8_t *expect_bytes(unsigned long int p_bytes_index, int count, const char *err_msg)	// mainly just checks if specified amount of bytes exist, not literally allocate, idk
+static inline uint8_t *expect_bytes(unsigned long p_bytes_index, int count, const char *err_msg)	// mainly just checks if specified amount of bytes exist, not literally allocate, idk
 {
 	if (count < 2)
 		ERREXIT("expect_bytes: Expected 'count' >= 2");
 	
-	if ((p_bytes_index + count - 1) >= file_size)
+	if ((p_bytes_index + (unsigned long) (count - 1)) >= file_size)
 		ERREXIT(err_msg, count, (unsigned long) (p_bytes_index - (file_size - 1)));	// 3rd arg for insufficient byte count that 'err_msg' must log
 	return p_bytecode + p_bytes_index;
 }
 
-/*
-static inline enum REG_SPEC expect_reg_spec(unsigned long int p_bytes_index, const char *err_msg)
-{
-	unsigned int byte = expect_byte(p_bytes_index, err_msg);	// scared of usual arithmetic conversion misinterpreting as negative values
-	if (byte > LAST_REG_SPEC)
-		ERREXIT(err_msg, byte);	// 'err_msg' must handle byte value
-	return (enum REG_SPEC) byte;
-}
-*/
-
 // surprised memcpy doesn't take a char pointer
-static inline void expect_bytes_memcpy(void *dest, unsigned long int p_bytes_index, int count, const char *err_msg)
+static inline void expect_bytes_memcpy(void *dest, unsigned long p_bytes_index, int count, const char *err_msg)
 {
-		uint8_t *src_literal_bytes = expect_bytes(ip, count, err_msg);	// one again, 'long' for insufficient byte count that 'err_msg' must log
-		memcpy(dest, src_literal_bytes, count);
+		uint8_t *src_literal_bytes = expect_bytes(p_bytes_index, count, err_msg);	// one again, 'long' for insufficient byte count that 'err_msg' must log
+		memcpy(dest, src_literal_bytes, (size_t) count);
 }
 
 // might just change these into opcode funcs
@@ -245,17 +239,17 @@ static void stack_pushn(uint8_t *p_bytes, int count)
 static void op_movr(enum OPERAND_READ_MODE operand_2_read_mode)
 {
 	// Max of 16 registers can be represented, only 8 exist so far
-	uint8_t info_byte = expect_byte();
-	enum REG dest_reg = ASSERT_IS_REG(info_byte & 0xF0);		// 0xF0 = 0b11110000, 16 possible registers that can be implemented
+	uint8_t info_byte = expect_byte(ip, "movr: expected info byte");
+	enum REG dest_reg = ASSERT_IS_REG(info_byte & 0xF0, "movr: expected valid dest reg");		// 0xF0 = 0b11110000, 16 possible registers that can be implemented
 
 	if (operand_2_read_mode == USE_REG)
 	{
-		enum REG src_reg = ASSERT_IS_REG(info_byte & 0x0F);		// 0xF0 = 0b00001111
+		enum REG src_reg = ASSERT_IS_REG(info_byte & 0x0F, "movr: expected valid src reg");		// 0xF0 = 0b00001111
 		if (IS_I64_REG(dest_reg))
 			// ADD RANGE CASTING!!!! since double is being converted to int64_t
-			i64_regs[dest_reg] = IS_64_REG(src_reg) ? i64_regs[src_reg] : try_cast_fp_to_i64(fp_regs[src_reg]);
+			i64_regs[dest_reg] = IS_I64_REG(src_reg) ? i64_regs[src_reg] : try_cast_fp_to_i64(fp_regs[src_reg]);
 		else
-			fp_regs[dest_reg] = IS_64_REG(src_reg) ? (double) i64_regs[src_reg] : fp_regs[src_reg];
+			fp_regs[dest_reg] = IS_I64_REG(src_reg) ? (double) i64_regs[src_reg] : fp_regs[src_reg];
 	}
 	else	// literal size specification
 	{
@@ -284,8 +278,8 @@ static void run_bytecode(void)
 	while (ip != file_size)	// accomodate if ip points one past 'p_bytes'
 	{
 		uint8_t byte = p_bytecode[ip];
-		int opcode = byte & 0x3F	// 0b00111111
-		int operand_read_mode = byte & 0xFC	// 0b11000000
+		int opcode = byte & 0x3F;	// 0b00111111
+		int operand_read_mode = byte & 0xFC;	// 0b11000000
 		printf("HEX BYTE: %.2X\n", byte);
 	
 		switch (opcode)
@@ -332,7 +326,7 @@ int main(int argc, char *argv[])
 	{
 		printf("Some useful info:\n"
 			"sizeof(double): %zu\n"
-			"sizeof(int64_t): %zu\n",
+			"sizeof(int64_t): %zu\n"
 			"sizeof(void*): %zu\n",
 			sizeof(double), sizeof(int64_t), sizeof(void*));
 		return EXIT_SUCCESS;
