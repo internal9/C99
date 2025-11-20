@@ -8,7 +8,7 @@
 #include <errno.h>
 
 #if CHAR_BIT != 8
-	#error "DVM: a byte must be 8 bits for VM operations to work as intended"
+	#error "How?????"
 #endif
 
 // 'ERREXIT' & 'PERREXIT' expect *string literals* as the first argument format
@@ -292,11 +292,11 @@ static void run_bytecode(void)
 static void init_bytecode(FILE *p_bytecode_file)
 {
 	if (fseek(p_bytecode_file, 0, SEEK_END) != 0)
-		PERREXIT("Failed to read bytecode file: ");
+		PERREXIT("Failed to read bytecode file");
 
 	long ftell_result = ftell(p_bytecode_file);
 	if (ftell_result == -1L)
-		PERREXIT("Failed to read bytecode file: ");	// Especially file size that caused an overflow
+		PERREXIT("Failed to read bytecode file");	// Especially file size that caused an overflow
 
 	file_size = (unsigned long) ftell_result;	// i hate this
 
@@ -304,14 +304,16 @@ static void init_bytecode(FILE *p_bytecode_file)
 		return;
 
 	if (fseek(p_bytecode_file, 0, SEEK_SET) != 0)	// heard setting it to start is safe, i'm paranoid tho
-		PERREXIT("Failed to read bytecode file: ");
+		PERREXIT("Failed to read bytecode file");
 
 	p_bytecode = malloc((size_t) file_size); // I would use a VLA but I can't gracefully handle those errors if a stack overflow happens
-		PERREXIT("Failed to read bytecode file: ");
+
+	if (p_bytecode == NULL)
+		PERREXIT("Failed to read bytecode file");
 
 	// assuming bytecode files don't have an EOF indicator (Linux)
 	if (fread(p_bytecode, 1, (size_t) file_size, p_bytecode_file) != (size_t) file_size)	// if only file_size was size_t instead of long..
-		PERREXIT("Failed to read bytecode file: ");
+		PERREXIT("Failed to read bytecode file");
 	
 	// debug
 	printf("Bytecode file size: %lu\n", file_size);
@@ -320,9 +322,10 @@ static void init_bytecode(FILE *p_bytecode_file)
 int main(int argc, char *argv[])
 {
 	if (argc != 2)
-		ERREXIT("Expected only one argument, either -i (print info), or a bytecode file\n");
+		ERREXIT("Expected only one argument, either -i (print info), or a bytecode file");
 
-	if (strcmp(argv[1], "-i"))
+	const char *arg = argv[1];
+	if (strcmp(arg, "-i") == 0)
 	{
 		printf("Some useful info:\n"
 			"sizeof(double): %zu\n"
@@ -333,10 +336,9 @@ int main(int argc, char *argv[])
 	}
 	// FUN FACT: stderr is typically unbuffered, it prints immediately due to the importance of warning and error messages!
 
-	const char *file_name = argv[1];
-	FILE *p_bytecode_file = fopen(file_name, "rb");
+	FILE *p_bytecode_file = fopen(arg, "rb");
 	if (p_bytecode_file == NULL)	// FUN FACT: NULL is implementation-defined, it could be integer literal 0 or (void*) 0, either way it always behaves consitently
-		PERREXIT("Failed to open file '%s': ", file_name);
+		PERREXIT("Failed to open file '%s'", arg);
 
 	init_bytecode(p_bytecode_file);
 	run_bytecode();
