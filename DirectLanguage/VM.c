@@ -1,8 +1,13 @@
+/*
+	*NOTES*
+	Make incrementing ip after running instruction as easy as possible
+*/
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <inttypes.h>	// #includes <stdint.h> too
 #include <math.h>
 #include <limits.h>
 #include <errno.h>
@@ -21,95 +26,97 @@
 #define MAX(x, y) (((x) >= (y)) ? (x) : (y))
 #define STACK_SIZE 512	// i sure do love arbitrary numbers
 
+// Explicit values just to make stuff easier
 enum OPCODE
 {
 	// memory transfer operations
-	MOVR,	// # bytes used depends on reg used
-	MOVS,	// move value into stack address
-	MOVH,	// move value into heap address at stack address?
-	TRS,	// transfer to reg from stack
-	TSR,	// transfer to stack from reg
-	TRH,	// transfer to reg from heap address
-	THR,	// transfer to heap address from reg
+	MOVR = 0,	// # bytes used depends on reg used
+	MOVS = 1,	// move value into stack address
+	MOVH = 2,	// move value into heap address at stack address?
+	TRS = 3,	// transfer to reg from stack
+	TSR = 4,	// transfer to stack from reg
+	TRH = 5,	// transfer to reg from heap address
+	THR = 6,	// transfer to heap address from reg
 
 	// arithmetic operations
 	// op [reg]
-	ZERO,
-	INC,
-	DEC,
+	ZERO = 6,
+	INC = 7,
+	DEC = 8,
 
-	//op reg, [value | freg]
-	ADD,
-	SUB,
-	MUL,
-	DIV,
-	SQRT,
-	POW,
-	LOG,
+	//op fpreg, [value | fpreg]
+	ADD = 9,
+	SUB = 10,
+	MUL = 11,
+	DIV = 12,
+	SQRT = 13,
+	POW = 14,
+	LOG = 15,
 
 	// bitwise operations
 	// op reg, [value | reg]
-	NOT,
-	AND,
-	OR,
-	XOR,
-	BIC,
+	NOT = 16,
+	AND = 17,
+	OR = 18,
+	XOR = 19,
+	BIC = 20,
 
 	// logical shift (no regard for sign bit)
-	LLSH,
-	LRSH,
+	LLSH = 21,
+	LRSH = 22,
 
 	// arithmetic shift (sign bit unaffected)
-	ALSH,
-	ARSH,
+	ALSH = 23,
+	ARSH = 24,
 
 	// stack dedicated operations
 	// op [val | reg]
-	PUSH,
-	FPUSH,
+	PUSH = 25,
+	FPUSH = 26,
 
 	// op [reg]
-	POP,
-	FPOP,	// popping into a general register performs double -> u64 conversion
+	POP = 26,
+	FPOP = 27,	// popping into a general register performs double -> u64 conversion
 
 	// branching operations
-	JMP,
-	JNE,
-	JE,
-	JL,
-	JLE,
-	JG,
-	JGE,
-	CALL,
-	BICALL,	// built-in call
-	RET,
+	JMP = 28,
+	JNE = 29,
+	JE = 30,
+	JL = 31,
+	JLE = 32,
+	JG = 33,
+	JGE = 34,
+	CALL = 35,
+	BICALL = 36,	// built-in call
+	RET = 37,
 
 	// dynamic memory operations
 	/*
 		alloc [addr], [bytes] heap-array addr to put memory address of heap-allocated data into
 		has mode bit for zero-initializing newly allocated data IF resizing bigger
 	*/
-	ALLOC,
+	ALLOC = 38,
 	/*
 		realloc [mem_addr], [bytes]
 		mem_addr: addr of the heap-allocated data itself
 	*/
-	REALLOC,
+	REALLOC = 39,
 	/*
 		dealloc [mem_addr]
 		mem_addr: addr of the heap-allocated data itself
 	*/
-	DEALLOC,
+	DEALLOC = 40,
 
 	// misc operations
-	CMP,
+	CMP = 41,
+	PRINTREG = 42,
 };
 
 // should just remove lol
 // Specify size to use for operands that can either be regs or literals, to save bytes ig. Orrr just read a reg
 enum OPERAND_READ_MODE
 {
-	USE_REG,
+	USE_REG = 0,
 	
 	/*
 		If instructions operates on reg or stack location:
@@ -120,38 +127,35 @@ enum OPERAND_READ_MODE
 			They expect sizeof(int64_t) or sizeof(double) amount of bits
 			*depending* on instruction
 	*/
-	FULL,
-	HALF,
-	EIGHT
+	FULL = 1,
+	HALF = 2,
+	EIGHT = 3
 };
 
 enum REG
 {	
-	R1,
-	R2,
-	RAX,
-	RBP,
-	PRBP,
-	RSP,
-	FR1,
-	FR2,
+	R1 = 0,
+	R2 = 1,
+	RAX = 2,
+	RBP = 3,
+	PRBP = 4,
+	RSP = 5,
+	FR1 = 6,
+	FR2 = 7
 };
 
+// wish i could change enum base type in C99
+#define IS_I_REG(int_val) ((int) (int_val) >= (int) R1 && (int) (int_val) <= (int) PRBP)
+#define IS_FP_REG(int_val) ((int) (int_val) == (int) FR1 || (int) (int_val) == (int) FR2)
+#define IS_REG(int_val) ((int) (int_val) >= (int) R1 && (int) (int_val) <= (int) FR2)
 
-#define IS_I64_REG(int_val) ((int_val) >= R1 && (int_val) <= PRBP)
-#define IS_FP_REG(int_val) ((int_val) == FR1 || (int_val) == FR2)
-
-// variadic args are error msg format and args
-#define ASSERT_IS_FP_REG(int_val, ...) (IS_FP_REG(int_val) ? (int_val) : (ERREXIT(__VA_ARGS__), 0)
-#define ASSERT_IS_REG(int_val, ...) ((int_val) >= R1 && (int_val) <= FR2 ? (int_val) : (ERREXIT(__VA_ARGS__), 0))	// yeah idk about this
-
-int64_t i64_regs[] = {
+int64_t i_regs[] = {
 	[R1] = 0,
 	[R2] = 0,
 	[RAX] = 0,	
 	[RBP] = 0,
 	[PRBP] = 0,
-	[RSP] = -1,
+	[RSP] = -1,	// full stack implementation, so RSP points to most recently pushed value started from 0
 };
 
 double fp_regs[] = {
@@ -199,92 +203,149 @@ static inline uint8_t expect_byte(unsigned long p_bytes_index, const char *err_m
 	return p_bytecode[p_bytes_index];
 }
 
-// should bound check 'count'
-static inline uint8_t *expect_bytes(unsigned long p_bytes_index, int count, const char *err_msg)	// mainly just checks if specified amount of bytes exist, not literally allocate, idk
+// 'err_msg' is expected to have two 'unsigned long' formats for count & insufficient bytes given (compared to expected)
+static inline uint8_t *expect_bytes(unsigned long p_bytes_index, unsigned long count, const char *err_msg)	// mainly just checks if specified amount of bytes exist, not literally allocate, idk
 {
 	if (count < 2)
 		ERREXIT("expect_bytes: Expected 'count' >= 2");
-	
-	if ((p_bytes_index + (unsigned long) (count - 1)) >= file_size)
-		ERREXIT(err_msg, count, (unsigned long) (p_bytes_index - (file_size - 1)));	// 3rd arg for insufficient byte count that 'err_msg' must log
+
+	if (p_bytes_index > file_size)
+	   	ERREXIT(err_msg, count, 0);	// 0 bytes given
+
+	unsigned long byte_count_end = p_bytes_index + (count - 1);
+	if (byte_count_end >= file_size)
+		ERREXIT(err_msg, count, file_size - p_bytes_index);	// 3rd arg for insufficient byte count that 'err_msg' must log, e.g. "only got X bytes"
 	return p_bytecode + p_bytes_index;
 }
 
 // surprised memcpy doesn't take a char pointer
-static inline void expect_bytes_memcpy(void *dest, unsigned long p_bytes_index, int count, const char *err_msg)
+static inline void expect_bytes_memcpy(void *dest, unsigned long p_bytes_index, unsigned long count, const char *err_msg)
 {
-		uint8_t *src_literal_bytes = expect_bytes(p_bytes_index, count, err_msg);	// one again, 'long' for insufficient byte count that 'err_msg' must log
-		memcpy(dest, src_literal_bytes, (size_t) count);
+	uint8_t *src_literal_bytes = expect_bytes(p_bytes_index, count, err_msg);
+	memcpy(dest, src_literal_bytes, (size_t) count);
+}
+
+static inline enum REG expect_reg(unsigned long p_bytes_index, const char *err_msg)
+{
+	uint8_t byte = expect_byte(p_bytes_index, err_msg);
+	if (!IS_REG(byte))
+	   ERREXIT(err_msg);
+	return (enum REG) byte;
 }
 
 // might just change these into opcode funcs
 static void stack_push(uint8_t byte)
 {
-	if (i64_regs[RSP] == STACK_SIZE - 1)
-		ERREXIT("VM stack overflow\n");
+	if (i_regs[RSP] == STACK_SIZE - 1)
+		ERREXIT("VM stack overflow");
 
-	stack[++i64_regs[RSP]] = byte;
+	stack[++i_regs[RSP]] = byte;
 }
 
 static void stack_pushn(uint8_t *p_bytes, int count)
 {
-	if (i64_regs[RSP] == STACK_SIZE - count)
+	if (i_regs[RSP] == STACK_SIZE - count)
 		ERREXIT("VM stack overflow\n");
 
-	i64_regs[RSP] += count;
+	i_regs[RSP] += count;
 	memcpy((stack + ip) + 1, p_bytes, (size_t) count);
+}
+
+// base + index * scale + displacement
+static unsigned long read_stack_addr(uint8_t info_byte)
+{
+	enum OPERAND_READ_MODE base_read_mode = info_byte & 0xC0;		// 0xC0 = 0b11000000
+	enum OPERAND_READ_MODE index_read_mode = info_byte & 0x30;		// 0x30 = 0b00110000
+	enum OPERAND_READ_MODE scale_read_mode = info_byte & 0x0C;	   	// 0x0C = 0b00001100
+	enum OPERAND_READ_MODE displacement_read_mode = info_byte & 0x03;	// 0x03 = 0b00000011
+
+	int64_t base = 0, index = 0, scale = 1, displacement = 0;
+	if (base_read_mode == USE_REG)
+	{
+		enum REG base_reg = expect_reg(ip, "Expected byte containing valid reg for reading base of stack address");
+		if (!IS_I_REG(base_reg))
+			ERREXIT("Stack address: expected integer reg (i reg)");
+
+		base = i_regs[base_reg];
+	}
+	else		   // Size specification for literal operand
+	{
+		expect_bytes_memcpy(&base, ip, (unsigned long) I_LITERAL_SIZES[base_read_mode],
+			"Stack address: expected %lu bytes for base value literal, instead got %lu bytes");
+	}
 }
 
 // instrs
 static void op_movr(enum OPERAND_READ_MODE operand_2_read_mode)
 {
-	// Max of 16 registers can be represented, only 8 exist so far
-	uint8_t info_byte = expect_byte(ip, "movr: expected info byte");
-	enum REG dest_reg = ASSERT_IS_REG(info_byte & 0xF0, "movr: expected valid dest reg");		// 0xF0 = 0b11110000, 16 possible registers that can be implemented
+	enum REG dest_reg = expect_reg(ip + 1, "movr: expected byte containing valid dest reg");
 
 	if (operand_2_read_mode == USE_REG)
 	{
-		enum REG src_reg = ASSERT_IS_REG(info_byte & 0x0F, "movr: expected valid src reg");		// 0xF0 = 0b00001111
-		if (IS_I64_REG(dest_reg))
-			// ADD RANGE CASTING!!!! since double is being converted to int64_t
-			i64_regs[dest_reg] = IS_I64_REG(src_reg) ? i64_regs[src_reg] : try_cast_fp_to_i64(fp_regs[src_reg]);
+		enum REG src_reg = expect_reg(ip + 2, "movr: expected byte containing valid src reg");
+		printf("movr: %d %d\n", dest_reg, src_reg);
+
+		if (IS_I_REG(dest_reg))
+			i_regs[dest_reg] = IS_I_REG(src_reg) ? i_regs[src_reg] : try_cast_fp_to_i64(fp_regs[src_reg]);
 		else
-			fp_regs[dest_reg] = IS_I64_REG(src_reg) ? (double) i64_regs[src_reg] : fp_regs[src_reg];
+			fp_regs[dest_reg] = IS_I_REG(src_reg) ? (double) i_regs[src_reg] : fp_regs[src_reg];
+
+		ip += 3;	// info_byte + regs info byte
 	}
 	else	// literal size specification
 	{
 		int literal_type_size;
 
-		if (IS_I64_REG(dest_reg))
+		if (IS_I_REG(dest_reg))
 		{
-			int64_t src_literal;
+			int64_t i_src_literal;
 			literal_type_size = I_LITERAL_SIZES[operand_2_read_mode];
-			expect_bytes_memcpy(&src_literal, ip, literal_type_size, "some err msg lmaoooo");
-			i64_regs[dest_reg] = src_literal;
+			printf("the j: %d\n", operand_2_read_mode);
+
+			expect_bytes_memcpy(&i_src_literal, ip + 2, (unsigned long) literal_type_size,
+				"movr: expected %lu bytes for integer src literal, instead got %lu");
+
+			i_regs[dest_reg] = i_src_literal;
 		}
 		else
 		{
-			double src_literal;
+			double fp_src_literal;
 			literal_type_size = FP_LITERAL_SIZES[operand_2_read_mode];
-			expect_bytes_memcpy(&src_literal, ip, literal_type_size, "some err msg lmaoooo");
-			fp_regs[dest_reg] = src_literal;
+			expect_bytes_memcpy(&fp_src_literal, ip + 2, (unsigned long) literal_type_size,
+				"movr: expected %lu bytes for floating-point src literal, instead got %lu");
+
+			fp_regs[dest_reg] = fp_src_literal;
 		}
 	}
 }
 
+//	stack addr
+static void op_movs(enum OPERAND_READ_MODE operand_2_read_mode)
+{
+	
+}
+
+static inline void op_printreg(void)	// wow
+{
+	enum REG src_reg = expect_byte(ip + 1, "printreg: expected byte for src reg");
+	printf("printreg %d: %" PRId64 "\n", src_reg, i_regs[src_reg]);
+	ip += 2;
+}
+
 static void run_bytecode(void)
 {
-	printf("INSTR POINTER: %lu\n FILE SIZE: %lu\n", ip, file_size);
+	printf("INSTR POINTER: %lu\nFILE SIZE: %lu\n", ip, file_size);
 	while (ip != file_size)	// accomodate if ip points one past 'p_bytes'
 	{
 		uint8_t byte = p_bytecode[ip];
-		int opcode = byte & 0x3F;	// 0b00111111
-		int operand_read_mode = byte & 0xFC;	// 0b11000000
-		printf("HEX BYTE: %.2X\n", byte);
+		int opcode = byte & 0x3F;	// 0x3F = 0b00111111
+		enum OPERAND_READ_MODE operand_read_mode = (byte & 0xC0) >> 6;	// 0xC0 = 0b11000000, shift 6 to extract value without impact from trailing zeros
+		printf("HEX BYTE: %.2X\nOPCODE: %.2X\n", byte, opcode);
 	
 		switch (opcode)
 		{
-			case MOVR: op_movr(operand_read_mode); break;
+			case MOVR: printf("THE BYTE %d\n", operand_read_mode); op_movr(operand_read_mode); break;
+			case PRINTREG: op_printreg(); break;
 		}
 	}
 }
