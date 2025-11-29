@@ -1,6 +1,8 @@
 /*
 	*NOTES*
 	Make incrementing ip after running instruction as easy as possible
+	Line debugging
+	make expect byte auto increment instruction pointer?
 */
 
 #include <stdlib.h>
@@ -9,6 +11,7 @@
 #include <stddef.h>
 #include <inttypes.h>	// #includes <stdint.h> too
 #include <math.h>
+#include <stdbool.h>
 #include <limits.h>
 #include <errno.h>
 
@@ -24,14 +27,15 @@
 */
 #define PERREXIT(...) (fprintf(stderr, __VA_ARGS__), fputs(": ", stderr), perror(NULL), exit(errno))
 #define MAX(x, y) (((x) >= (y)) ? (x) : (y))
-#define STACK_SIZE 512	// i sure do love arbitrary numbers
+#define STACK_SIZE 512	// i sure do love arbitrary numbers, will change later
 
-// Explicit values just to make stuff easier
+// Explicit values just to make stuff easier (yeah i gonna fix this later)
 enum OPCODE
 {
 	// memory transfer operations
 	MOVR = 0,	// # bytes used depends on reg used
-	MOVS = 1,	// move value into stack address
+	MOVSI = 1,	// move 64-bit integer value into stack address
+	MOVSF = 100,	// move float value into stack address
 	MOVH = 2,	// move value into heap address at stack address?
 	TRS = 3,	// transfer to reg from stack
 	TSR = 4,	// transfer to stack from reg
@@ -247,24 +251,28 @@ static void stack_pushn(uint8_t *p_bytes, int count)
 	if (i_regs[RSP] == STACK_SIZE - count)
 		ERREXIT("VM stack overflow\n");
 
+	memcpy((stack + i_regs[RSP]) + 1, p_bytes, (size_t) count);
 	i_regs[RSP] += count;
-	memcpy((stack + ip) + 1, p_bytes, (size_t) count);
 }
 
-// base + index * scale + displacement
-static unsigned long read_stack_addr(uint8_t info_byte)
+/*
+	yeah idk abt ts..
+	base + index * scale + displacement
+*/
+static int read_stack_addr(uint8_t info_byte)
 {
-	enum OPERAND_READ_MODE base_read_mode = info_byte & 0xC0;		// 0xC0 = 0b11000000
-	enum OPERAND_READ_MODE index_read_mode = info_byte & 0x30;		// 0x30 = 0b00110000
-	enum OPERAND_READ_MODE scale_read_mode = info_byte & 0x0C;	   	// 0x0C = 0b00001100
+	enum OPERAND_READ_MODE base_read_mode = (info_byte & 0xC0) >> 6;	// 0xC0 = 0b11000000
+	enum OPERAND_READ_MODE index_read_mode = (info_byte & 0x30) >> 4;	// 0x30 = 0b00110000
+	enum OPERAND_READ_MODE scale_read_mode = (info_byte & 0x0C) >> 2;   	// 0x0C = 0b00001100
 	enum OPERAND_READ_MODE displacement_read_mode = info_byte & 0x03;	// 0x03 = 0b00000011
 
 	int64_t base = 0, index = 0, scale = 1, displacement = 0;
+
 	if (base_read_mode == USE_REG)
 	{
 		enum REG base_reg = expect_reg(ip, "Expected byte containing valid reg for reading base of stack address");
 		if (!IS_I_REG(base_reg))
-			ERREXIT("Stack address: expected integer reg (i reg)");
+			ERREXIT("Stack address: expected integer reg (i reg) for base value");
 
 		base = i_regs[base_reg];
 	}
@@ -273,6 +281,42 @@ static unsigned long read_stack_addr(uint8_t info_byte)
 		expect_bytes_memcpy(&base, ip, (unsigned long) I_LITERAL_SIZES[base_read_mode],
 			"Stack address: expected %lu bytes for base value literal, instead got %lu bytes");
 	}
+
+	if (scale_read_mode == USE_REG)
+	{
+		enum REG base_reg = expect_reg(ip, "Expected byte containing valid reg for reading scale of stack address");
+		if (!IS_I_REG(base_reg))
+			ERREXIT("Stack address: expected integer reg (i reg) for scale value");
+
+		base = i_regs[base_reg];
+	}
+	else		   // Size specification for literal operand
+	{
+		expect_bytes_memcpy(&base, ip, (unsigned long) I_LITERAL_SIZES[base_read_mode],
+			"Stack address: expected %lu bytes for scale value literal, instead got %lu bytes");
+	}
+
+	if (displacement_read_mode == USE_REG)
+	{
+		enum REG base_reg = expect_reg(ip, "Expected byte containing valid reg for reading displacement of stack address");
+		if (!IS_I_REG(base_reg))
+			ERREXIT("Stack address: expected integer reg (i reg) for displacement value");
+
+		base = i_regs[base_reg];
+	}
+	else		   // Size specification for literal operand
+	{
+		expect_bytes_memcpy(&base, ip, (unsigned long) I_LITERAL_SIZES[base_read_mode],
+			"Stack address: expected %lu bytes for displacement value literal, instead got %lu bytes");
+	}
+
+	int64_t stack_addr = base + index * scale + displacement;	// No overflow check? boohoo
+	if (stack_addr >= STACK_SIZE)
+	   ERREXIT("Stack address: stack addr %ld is larger than max stack addr %d", stack_addr, STACK_SIZE - 1);
+
+	if (stack_addr < 0)
+	   ERREXIT("Stack address: stack addr %ld is less than 0", stack_addr);
+	return (int) stack_addr;
 }
 
 // instrs
@@ -318,11 +362,57 @@ static void op_movr(enum OPERAND_READ_MODE operand_2_read_mode)
 		}
 	}
 }
-
-//	stack addr
-static void op_movs(enum OPERAND_READ_MODE operand_2_read_mode)
+/* idk
+get_stack_addr_part_size(enum)
 {
+	switch ()
+	{
+		return sizeof(int);
+		return sizeof(int) / 4;
+	}
+}
+*/
+
+static void op_movsi(enum OPERAND_READ_MODE operand_2_read_mode)
+{
+	uint8_t stack_addr_info = expect_byte(ip + 1, "movsi: expected info byte for reading stack address");
+	int stack_addr = read_stack_addr(stack_addr_info);
 	
+	if (operand_2_read_mode == USE_REG)
+	{
+		enum REG src_reg = expect_reg(ip + 2, "movsf: expected integer src reg for value");
+		if (!IS_I_REG(src_reg))
+			ERREXIT("movsi: expected integer reg for moving value into");
+		memcpy(stack + stack_addr, &i_regs[src_reg], sizeof(int64_t));
+	}
+	else	// literal
+	{
+		int64_t i_src_literal;
+		int literal_type_size = I_LITERAL_SIZES[operand_2_read_mode];
+		expect_bytes_memcpy(&i_src_literal, ip + 2, (unsigned long) literal_type_size,
+			"movsi: expected %lu bytes for integer src literal, instead got %lu");
+	}
+}
+
+static void op_movsf(enum OPERAND_READ_MODE operand_2_read_mode)
+{
+	uint8_t stack_addr_info = expect_byte(ip + 1, "movsf: expected info byte for reading stack address");
+	int stack_addr = read_stack_addr(stack_addr_info);
+	
+	if (operand_2_read_mode == USE_REG)
+	{
+		enum REG src_reg = expect_reg(ip + 2, "movsf: expected floating-point src reg for value");
+		if (!IS_I_REG(src_reg))
+			ERREXIT("movsi: expected integer reg for moving value into");
+		memcpy(stack + stack_addr, &i_regs[src_reg], sizeof(int64_t));
+	}
+	else	// literal
+	{
+		double i_src_literal;
+		int literal_type_size = FP_LITERAL_SIZES[operand_2_read_mode];
+		expect_bytes_memcpy(&i_src_literal, ip + 2, (unsigned long) literal_type_size,
+			"movsi: expected %lu bytes for floating-point src literal, instead got %lu");
+	}
 }
 
 static inline void op_printreg(void)	// wow
