@@ -129,11 +129,9 @@ bool hashmap_delete(struct HashMap *pmap, const char *key, size_t key_len)
 	return false;
 }
 
-// TODO: test it lol
-int main(void)
+// Calloc error handling is up to the programmer
+void init_hashmap(struct HashMap *p_hashmap, size_t init_size)
 {
-	struct HashMap map = {
-		.buckets = calloc((size_t) HASHMAP_INIT_SIZE * sizeof(struct Bucket),  sizeof(struct Bucket)),
-		.size = (size_t) HASHMAP_INIT_SIZE
-	}, *pmap = &map;
-
+	p_hashmap->buckets = calloc(init_size * sizeof(struct Bucket),  sizeof(struct Bucket));
+	p_hashmap->size = init_size;
+}
