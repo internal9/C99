@@ -4,7 +4,6 @@
 #include <stddef.h>
 #include <stdbool.h>
 #define HASHMAP_INIT_SIZE 16
-#define HASHMAP_NOVALUE (void*) -2	// Allow for keys that store a value of 0
 
 struct Bucket {
 	const char *key;
