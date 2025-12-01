@@ -98,6 +98,7 @@ void *hashmap_get(struct HashMap *p_hashmap, const char *key, size_t key_len)
 	return NULL;
 }
 
+// Returns a bool indicating if delete succeeded
 bool hashmap_delete(struct HashMap *p_hashmap, const char *key, size_t key_len)
 {
 	uint64_t hash = fnv1a_hash(key, key_len);
