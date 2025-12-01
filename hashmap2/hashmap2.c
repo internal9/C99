@@ -18,14 +18,14 @@ uint64_t fnv1a_hash(const char *str, size_t str_len)
 	return hash;
 }
 
-static void hashmap_resize(struct HashMap *pmap)
+static void hashmap_resize(struct HashMap *p_hashmap)
 {
-	struct Bucket *old_buckets = pmap->buckets;
-	size_t old_size = pmap->size;
-	pmap->size *= 2;
-	pmap->buckets = calloc(pmap->size * sizeof(struct Bucket), sizeof(struct Bucket));
+	struct Bucket *old_buckets = p_hashmap->buckets;
+	size_t old_size = p_hashmap->size;
+	p_hashmap->size *= 2;
+	p_hashmap->buckets = calloc(p_hashmap->size * sizeof(struct Bucket), sizeof(struct Bucket));
 
-	if (pmap->buckets == NULL)
+	if (p_hashmap->buckets == NULL)
 	{
 		free(old_buckets);
 		perror("Failed to allocate memory for buckets during hashmap resize\n");
@@ -38,29 +38,29 @@ static void hashmap_resize(struct HashMap *pmap)
 		if (old_bucket->key == NULL)
 			continue;
 
-		hashmap_put(pmap, old_bucket->key, old_bucket->key_len, old_bucket->pvalue);
+		hashmap_put(p_hashmap, old_bucket->key, old_bucket->key_len, old_bucket->pvalue);
 	}
 	free(old_buckets);
 }
 
-void hashmap_put(struct HashMap *pmap, const char *key, size_t key_len, void *pvalue)
+void hashmap_put(struct HashMap *p_hashmap, const char *key, size_t key_len, void *pvalue)
 {
 	uint64_t hash = fnv1a_hash(key, key_len);
-	int load_factor = (int) (pmap->stored  * 100 / pmap->size);
+	int load_factor = (int) (p_hashmap->stored  * 100 / p_hashmap->size);
 
 	if (load_factor > MAX_LOAD_FACTOR)
-		hashmap_resize(pmap);
+		hashmap_resize(p_hashmap);
 
-	for (size_t i = 0; i < pmap->size; i++)
+	for (size_t i = 0; i < p_hashmap->size; i++)
 	{
-		struct Bucket *bucket = pmap->buckets + ((hash + i) % pmap->size);
+		struct Bucket *bucket = p_hashmap->buckets + ((hash + i) % p_hashmap->size);
 
 		if (bucket->key == NULL)
 		{
 			bucket->key = key;
 			bucket->key_len = key_len;
 			bucket->pvalue = pvalue;
-			pmap->stored++;
+			p_hashmap->stored++;
 			break;
 		}
 		else if (strncmp(key, bucket->key, key_len) == 0)
@@ -71,11 +71,11 @@ void hashmap_put(struct HashMap *pmap, const char *key, size_t key_len, void *pv
 	}
 }
 
-void *hashmap_get(struct HashMap *pmap, const char *key, size_t key_len)
+void *hashmap_get(struct HashMap *p_hashmap, const char *key, size_t key_len)
 {
 	uint64_t hash = fnv1a_hash(key, key_len);
 	struct Bucket bucket;
-	bucket = pmap->buckets[hash % pmap->size];
+	bucket = p_hashmap->buckets[hash % p_hashmap->size];
 
 	// i might remove this, idk maybe branching makes it slower
 	if (bucket.key == NULL)
@@ -85,9 +85,9 @@ void *hashmap_get(struct HashMap *pmap, const char *key, size_t key_len)
 		return bucket.pvalue;
 
 	// there must be a collision, some other key hashed to the same index
-	for (size_t i = 1; i < pmap->size; i++)
+	for (size_t i = 1; i < p_hashmap->size; i++)
 	{
-		bucket = pmap->buckets[(hash + i) % pmap->size];	// modulo causes wrap around to (hash % size) - 1
+		bucket = p_hashmap->buckets[(hash + i) % p_hashmap->size];	// modulo causes wrap around to (hash % size) - 1
 		if (bucket.key == NULL)
 			continue;
 
@@ -98,11 +98,11 @@ void *hashmap_get(struct HashMap *pmap, const char *key, size_t key_len)
 	return NULL;
 }
 
-bool hashmap_delete(struct HashMap *pmap, const char *key, size_t key_len)
+bool hashmap_delete(struct HashMap *p_hashmap, const char *key, size_t key_len)
 {
 	uint64_t hash = fnv1a_hash(key, key_len);
 	struct Bucket *bucket;
-	bucket = pmap->buckets + (hash % pmap->size);
+	bucket = p_hashmap->buckets + (hash % p_hashmap->size);
 
 	if (bucket->key == NULL)
 		return false;
@@ -114,9 +114,9 @@ bool hashmap_delete(struct HashMap *pmap, const char *key, size_t key_len)
 	}
 
 	// there must be a collision, some other key hashed to the same index
-	for (size_t i = 1; i < pmap->size; i++)
+	for (size_t i = 1; i < p_hashmap->size; i++)
 	{
-		bucket = pmap->buckets + (hash + i) % pmap->size;
+		bucket = p_hashmap->buckets + (hash + i) % p_hashmap->size;
 		if (bucket->key == NULL)
 			continue;
 			
