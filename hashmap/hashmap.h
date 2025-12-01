@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #define HASHMAP_INIT_SIZE 16
+#define EMPTY (void*) -2
 
 struct Bucket {
 	const char *key;
