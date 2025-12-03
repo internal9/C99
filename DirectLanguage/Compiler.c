@@ -10,8 +10,14 @@
 #define PERREXIT(...) (fprintf(stderr, __VA_ARGS__), fputs(": ", stderr), perror(NULL), exit(errno))
 #define TAB_WIDTH 8       // Assumption, despite ambiguity 
 
+enum TkGroup {
+	MISC
+};
+
 enum TkType {
         END,        // 'stdlib.h' defines EOF macro for file handling
+        ARITH_OP,
+	BOOL_OP,
         INT,
         NUM,
         KEYWORD,
@@ -21,11 +27,11 @@ enum TkType {
 };
 
 struct Tk {
-        const char *p_src;
         const char *type_str;
         size_t len;
         long line;      // ftell is archaic and returns a 'long'
         long column;
+  	enum TkSubType
         enum TkType type;
 };
 
@@ -36,10 +42,11 @@ static long src_len;
 static char *src_txt;
 
 // NOTE: Might have to change later if wanting variadic args
-#define LEXWARN(msg) printf("WARNING (L%ld C%ld): " msg "\n", src_line, src_column)
+#define WARN(msg) printf("WARNING (L%ld C%ld): " msg "\n", src_line, src_column)
 // NOTE: May remove macros and use a variable to just set both of these once per token lexed
 #define INCPOS() (src_i++, src_column++)
 #define ADDPOS(n) (src_i+=n, src_column+=n)
+
 
 static void lex_int_or_num(struct Tk *p_tk, bool found_decimal)
 {
@@ -66,9 +73,9 @@ static void set_tk(struct Tk *p_tk)
         }
 
         char c;
-        while (isspace(c = src_txt[src_i])) {
+        while (isspace(c = src_txt[src_i++])) {
                 if (c == '\t') {
-                        LEXWARN("Tab character '\t' width assumed to be 8 spaces despite ambiguity "
+                        WARN("Tab character '\t' width assumed to be 8 spaces despite ambiguity "
                                 "width which may lead to inaccurate character column numbers in debugging");
                         ADDPOS(TAB_WIDTH);
                 } else if (c == '\n') {
@@ -78,12 +85,36 @@ static void set_tk(struct Tk *p_tk)
                         INCPOS();
         }
 
-        // switch case instead?
+	p_tk->len = 1;
+        p_tk->line = src_line;
+        p_tk->column = src_column;
+        
+        switch (c) {
+        case '+':
+        case '-':
+		p_tk->type = ARITH_OP;
+                char peek_c = src_txt[src_i];
+		
+                if (peek_c == c)
+			p_tk->len++, src_i++;
+        case '/':       
+        case '*':
+		
+                p_tk->type = ARITH_OP;
+        case '-':
+        case '-':
+        case '-':
+        case '-':
+        case '-':
+        case '-':
+          
+        }
         if (isdigit(c))
                 lex_int_or_num(p_tk, false);
         else if (c == '.')
                 lex_int_or_num(p_tk, true);
-
+        else if (isalpha(c))
+                lex_keyword_or_identifier(p_tk);
 }
 
 // should probably rework this to buffer instead of copying into a file
