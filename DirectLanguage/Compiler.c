@@ -11,7 +11,7 @@
 #define TAB_WIDTH 8       // Assumption, despite ambiguity 
 
 enum tk_type {
-	END,
+        END,
         OP_TERN,
 
         // arithmetic ops
@@ -73,19 +73,13 @@ enum tk_type {
         SQR_BRACKET_R,
         CUR_BRACKET_L,
         CUR_BRACKET_R,
+        STRUCT_SUBCRIPT,
 };
 
 /*
-enum TkType {
-        END,        // 'stdlib.h' defines EOF macro for file handling
-        ARITH_OP,
-	BOOL_OP,
-        INT,
-        NUM,
-        KEYWORD,
-        STRING,
-        CHAR,
-        MISC,
+enum tk_type_group
+{
+a
 }; */
 
 struct Tk {
