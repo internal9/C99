@@ -12,7 +12,6 @@
 
 enum tk_type {
         END,
-        OP_TERN,
 
         // arithmetic ops
         AOP_ADD,
@@ -66,14 +65,8 @@ enum tk_type {
         STMT_DIV_EQ,
         STMT_MOD_EQ,
 
-        // misc
-        PAREN_L,
-        PAREN_R,
-        SQR_BRACKET_L,
-        SQR_BRACKET_R,
-        CUR_BRACKET_L,
-        CUR_BRACKET_R,
-        STRUCT_SUBCRIPT,
+        // idk
+        MISC,
 };
 
 /*
@@ -89,6 +82,10 @@ struct Tk {
         long column;
   	enum TkSubType
         enum TkType type;
+        union {
+                char c;
+                const char *p_src;
+        } value;
 };
 
 static long src_line = 0;
