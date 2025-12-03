@@ -10,10 +10,72 @@
 #define PERREXIT(...) (fprintf(stderr, __VA_ARGS__), fputs(": ", stderr), perror(NULL), exit(errno))
 #define TAB_WIDTH 8       // Assumption, despite ambiguity 
 
-enum TkGroup {
-	MISC
+enum tk_type {
+	END,
+        OP_TERN,
+
+        // arithmetic ops
+        AOP_ADD,
+        AOP_SUB,
+        AOP_INC,
+        AOP_DEC,
+        AOP_MUL,
+        AOP_DIV,
+        AOP_POW,
+
+        // boolean ops
+        BOP_EQ,
+        BOP_NOT,
+        BOP_LESS,
+        BOP_GREATER,
+        BOP_LESS_OR_EQ,
+        BOP_GREATER_OR_EQ,
+        BOP_AND,
+        BOP_OR,
+
+        // bitwise ops
+        BWOP_SHL,
+        BWOP_SHR,
+        BWOP_AND,
+        BWOP_NOT,
+        BWOP_XOR,
+        BWOP_OR,
+
+        // keyword
+        KW_BOOL,
+        KW_CHAR,
+        KW_INT,
+        KW_NUM,
+        KW_STRING,
+        KW_ARRAY,
+        KW_STRUCT,
+        KW_DYNAMIC,
+        KW_CONST,
+        KW_IF,
+        KW_ELIF,
+        KW_ELSE,
+        KW_WHILE,
+        KW_DO_WHILE,
+        KW_FUNC,
+
+        // statements
+        STMT_EQ,
+        STMT_ADD_EQ,
+        STMT_SUB_EQ,
+        STMT_MUL_EQ,
+        STMT_DIV_EQ,
+        STMT_MOD_EQ,
+
+        // misc
+        PAREN_L,
+        PAREN_R,
+        SQR_BRACKET_L,
+        SQR_BRACKET_R,
+        CUR_BRACKET_L,
+        CUR_BRACKET_R,
 };
 
+/*
 enum TkType {
         END,        // 'stdlib.h' defines EOF macro for file handling
         ARITH_OP,
@@ -24,7 +86,7 @@ enum TkType {
         STRING,
         CHAR,
         MISC,
-};
+}; */
 
 struct Tk {
         const char *type_str;
