@@ -11,7 +11,7 @@
 #define TAB_WIDTH 8       // Assumption, despite ambiguity 
 
 enum tk_type {
-        END,
+        MISC_END,
 
         // arithmetic ops
         AOP_ADD,
@@ -65,27 +65,38 @@ enum tk_type {
         STMT_DIV_EQ,
         STMT_MOD_EQ,
 
-        // idk
-        MISC,
+	LIT_BOOL,
+	LIT_CHAR,
+	LIT_INT,
+	LIT_NUM,
+	LIT_STR,
+	
+	MISC,
+
+	// remove?
+	PAREN_L,
+	PAREN_R,
+	BRACKET_L,
+	BRACKET_R,
+	BRACE_L,
+	BRACE_R,
+	DOT,
+	SEMICOLON,
 };
 
-/*
 enum tk_type_group
 {
-a
-}; */
+
+};
 
 struct Tk {
         const char *type_str;
+  	const char *src_data;
         size_t len;
         long line;      // ftell is archaic and returns a 'long'
         long column;
-  	enum TkSubType
-        enum TkType type;
-        union {
-                char c;
-                const char *p_src;
-        } value;
+	enum tk_type;
+	enum tk_type_group;
 };
 
 static long src_line = 0;
