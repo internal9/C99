@@ -11,8 +11,6 @@
 #define TAB_WIDTH 8       // Assumption, despite ambiguity 
 
 enum tk_type {
-        MISC_END,
-
         // arithmetic ops
         AOP_ADD,
         AOP_SUB,
@@ -22,15 +20,15 @@ enum tk_type {
         AOP_DIV,
         AOP_POW,
 
-        // boolean ops
-        BOP_EQ,
-        BOP_NOT,
-        BOP_LESS,
-        BOP_GREATER,
-        BOP_LESS_OR_EQ,
-        BOP_GREATER_OR_EQ,
-        BOP_AND,
-        BOP_OR,
+        // logical ops
+        LOP_EQ,
+        LOP_NOT,
+        LOP_LESS,
+        LOP_GREATER,
+        LOP_LESS_OR_EQ,
+        LOP_GREATER_OR_EQ,
+        LOP_AND,
+        LOP_OR,
 
         // bitwise ops
         BWOP_SHL,
@@ -39,6 +37,13 @@ enum tk_type {
         BWOP_NOT,
         BWOP_XOR,
         BWOP_OR,
+
+        // literals
+        LIT_BOOL,
+        LIT_CHAR,
+        LIT_INT,
+        LIT_NUM,
+        LIT_STR,
 
         // keyword
         KW_BOOL,
@@ -57,50 +62,53 @@ enum tk_type {
         KW_DO_WHILE,
         KW_FUNC,
 
-        // statements
-        STMT_EQ,
-        STMT_ADD_EQ,
-        STMT_SUB_EQ,
-        STMT_MUL_EQ,
-        STMT_DIV_EQ,
-        STMT_MOD_EQ,
-
-	LIT_BOOL,
-	LIT_CHAR,
-	LIT_INT,
-	LIT_NUM,
-	LIT_STR,
-	
-	MISC,
-
-	// remove?
-	PAREN_L,
-	PAREN_R,
-	BRACKET_L,
-	BRACKET_R,
-	BRACE_L,
-	BRACE_R,
-	DOT,
-	SEMICOLON,
+        // compound assignments
+        CA_ADD_EQ,
+        CA_SUB_EQ,
+        CA_MUL_EQ,
+        CA_DIV_EQ,
+        CA_MOD_EQ,
+        
+        // misc
+        EQ,         // =  *misc*, since either *declaration* or *reassign*
+        PAREN_L,    // (
+        PAREN_R,    // )
+        BRACKET_L,  // [
+        BRACKET_R,  // ]
+        BRACE_L,    // {
+        BRACE_R,    // }
+        DOT,        // .
+        SEMICOLON,  // ;
+        COLON,      // :
+        QUESTION,   // ?
+        END         // Not an actual character, just used to represent when last index is reached
 };
 
 enum tk_type_group
 {
-
+        ARITH,
+        LOGICAL,
+        BITWISE,
+        LITERAL,
+        KEYWORD,
+        MISC,
 };
 
 struct Tk {
-        const char *type_str;
-  	const char *src_data;
-        size_t len;
-        long line;      // ftell is archaic and returns a 'long'
+        union {
+                int64_t int_v;        // Used by LIT_INT
+                double fp_v;          // Used by LIT_FP
+                const char *src;      // Used by LIT_STR
+                char c;               // used by LIT_CHAR
+        } value;
+        long line;      // 'ftell' is archaic and returns a 'long'
         long column;
-	enum tk_type;
-	enum tk_type_group;
+        enum tk_type_group type_group;
+        enum tk_type type; 
 };
-
+]
 static long src_line = 0;
-static long src_column = 0;
+pstatic long src_column = 0;
 static long src_i = 0;
 static long src_len;
 static char *src_txt;
@@ -127,6 +135,14 @@ static void lex_int_or_num(struct Tk *p_tk, bool found_decimal)
         }
 }
 
+static void lex_identifier_or_keyword(struct Tk *p_tk)
+{
+        char c;
+        while {
+                
+        }
+}
+
 static void set_tk(struct Tk *p_tk)
 {
         if (src_i == src_len) {
@@ -149,21 +165,21 @@ static void set_tk(struct Tk *p_tk)
                         INCPOS();
         }
 
-	p_tk->len = 1;
+        p_tk->len = 1;
         p_tk->line = src_line;
         p_tk->column = src_column;
         
         switch (c) {
         case '+':
         case '-':
-		p_tk->type = ARITH_OP;
+                p_tk->type = ARITH_OP;
                 char peek_c = src_txt[src_i];
-		
+                
                 if (peek_c == c)
-			p_tk->len++, src_i++;
+                        p_tk->len++, src_i++;
         case '/':       
         case '*':
-		
+                
                 p_tk->type = ARITH_OP;
         case '-':
         case '-':
@@ -179,6 +195,7 @@ static void set_tk(struct Tk *p_tk)
                 lex_int_or_num(p_tk, true);
         else if (isalpha(c))
                 lex_keyword_or_identifier(p_tk);
+        
 }
 
 // should probably rework this to buffer instead of copying into a file
