@@ -63,56 +63,56 @@ enum tk_type {
         KW_DO_WHILE,
         KW_FUNC,
 
-	// literals
-	LIT_BOOL,
-	LIT_CHAR,
-	LIT_INT,
-	LIT_NUM,
-	LIT_STR,
+        // literals
+        LIT_BOOL,
+        LIT_CHAR,
+        LIT_INT,
+        LIT_NUM,
+        LIT_STR,
 
-	// misc
-	/*
-	  misc tokens can be interpreted in *various* ways,
-	  or are only ones serving *unique* purposes
-	*/
-	END,
-	PAREN_L,
-	PAREN_R,
-	BRACKET_L,
-	BRACKET_R,
-	BRACE_L,
-	BRACE_R,
-	DOT,
-	SEMICOLON,
+        // misc
+        /*
+          misc tokens can be interpreted in *various* ways,
+          or are only ones serving *unique* purposes
+        */
+        END,
+        PAREN_L,
+        PAREN_R,
+        BRACKET_L,
+        BRACKET_R,
+        BRACE_L,
+        BRACE_R,
+        DOT,
+        SEMICOLON,
 };
 
 enum tk_type_group
 {
         ASSIGN_OP,
-       	ARITH_OP,
-	LOGICAL_OP,
-	BITWISE_OP,
-	KEYWORD,
-	COMP_ASSIGN,
-	IDENTIFIER,
-	LITERAL,
-	MISC
+        ARITH_OP,
+        LOGICAL_OP,
+        BITWISE_OP,
+        KEYWORD,
+        COMP_ASSIGN,
+        IDENTIFIER,
+        LITERAL,
+        MISC
 };
 
 struct tk {
-	// Add 'type_group' type_str for debugging?
-	union {
-	        const char *src_data;  // Used by 'LIT_STR'
-	        int64_t int_v;         // Used by 'LIT_INT'
-		double fp_v;	       // Used by 'LIT_FP'
-	       	char c;		       // Used by 'LIT_CHAR'
-	} value;
+        // Add 'type_group' type_str for debugging?
+        union {
+                const char *src_data;  // Used by 'LIT_STR'
+                int64_t int_v;         // Used by 'LIT_INT'
+                double fp_v;           // Used by 'LIT_FP'
+                char c;                // Used by 'LIT_CHAR'
+        } value;
         const char *type_str;
         size_t len;
         long line;      // ftell is archaic and returns a 'long'
         long column;
-  	enum tk_type_group type_group;
-	enum tk_type type;
+        enum tk_type_group type_group;
+        enum tk_type type;
 };
 
 static long src_line = 0;
@@ -138,16 +138,16 @@ static void lex_int_or_num(struct Tk *p_tk, bool found_decimal)
                         found_decimal = true;
                         p_tk->type = LIT_NUM;
                 } else if (isdigit(c))
-			INCPOS();
-		else
-                	break;
+                        INCPOS();
+                else
+                        break;
         }
 }
 
 static void set_tk(struct Tk *p_tk)
 {
         if (src_i == src_len) {
-	  	p_tk->type_group = MISC;
+                p_tk->type_group = MISC;
                 p_tk->type = END;
                 p_tk->line = src_line;
                 p_tk->column = src_column;
@@ -167,22 +167,22 @@ static void set_tk(struct Tk *p_tk)
                         INCPOS();
         }
 
-	p_tk->len = 1;
+        p_tk->len = 1;
         p_tk->line = src_line;
         p_tk->column = src_column;
         
         switch (c) {
         case '+':
-	  	
+                
         case '-':
-		p_tk->type = ARITH_OP;
+                p_tk->type = ARITH_OP;
                 char peek_c = src_txt[src_i];
-		
+                
                 if (peek_c == c)
-			p_tk->len++, src_i++;
+                        p_tk->len++, src_i++;
         case '/':       
         case '*':
-		
+                
                 p_tk->type = ARITH_OP;
         case '-':
         case '-':
