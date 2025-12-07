@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <stdint.h>
 #include <errno.h>
 #include <stdbool.h>
 
@@ -11,13 +12,18 @@
 #define TAB_WIDTH 8       // Assumption, despite ambiguity 
 
 enum tk_type {
-        // assignment operators
-        ASOP_EQ,
-        ASOP_ADD_EQ,
-        ASOP_SUB_EQ,
-        ASOP_MUL_EQ,
-        ASOP_DIV_EQ,
-        ASOP_MOD_EQ,
+        // assigners
+        AS_EQ,
+        AS_ADD_EQ,
+        AS_SUB_EQ,
+        AS_MUL_EQ,
+        AS_DIV_EQ,
+        AS_POW_EQ,
+        AS_MOD_EQ,
+        AS_NOT_EQ,
+        AS_OR_EQ,
+        AS_AND_EQ,
+        AS_XOR_EQ,
 
         // arithmetic ops
         AROP_ADD,
@@ -27,6 +33,7 @@ enum tk_type {
         AROP_MUL,
         AROP_DIV,
         AROP_POW,
+        AROP_MOD,
 
         // logical ops
         LOP_EQ,
@@ -75,6 +82,7 @@ enum tk_type {
           misc tokens can be interpreted in *various* ways,
           or are only ones serving *unique* purposes
         */
+        IDENTIFIER,        
         END,
         PAREN_L,
         PAREN_R,
@@ -83,26 +91,23 @@ enum tk_type {
         BRACE_L,
         BRACE_R,
         DOT,
-        SEMICOLON,
+        SEMICOLON
 };
 
 enum tk_type_group
 {
-        ASSIGN_OP,
-        ARITH_OP,
-        LOGICAL_OP,
-        BITWISE_OP,
+        OP_ASSIGN,
+        OP_ARITH,
+        OP_LOGICAL,
+        OP_BITWISE,
         KEYWORD,
-        COMP_ASSIGN,
-        IDENTIFIER,
-        LITERAL,
         MISC
 };
 
 struct tk {
         // Add 'type_group' type_str for debugging?
         union {
-                const char *src_data;  // Used by 'LIT_STR'
+                const char *txt;  // Used by 'LIT_STR' & 'IDENTIFIER'
                 int64_t int_v;         // Used by 'LIT_INT'
                 double fp_v;           // Used by 'LIT_FP'
                 char c;                // Used by 'LIT_CHAR'
@@ -127,9 +132,17 @@ static char *src_txt;
 #define INCPOS() (src_i++, src_column++)
 #define ADDPOS(n) (src_i+=n, src_column+=n)
 
-
-static void lex_int_or_num(struct Tk *p_tk, bool found_decimal)
+static void lex_plus_char(struct tk *p_tk)
 {
+
+}
+
+// Add hex (and binary?) int / nums?
+static void lex_int_or_num(struct tk *p_tk, bool found_decimal)
+{
+        // first char already read
+        INCPOS();
+
         char c;
         p_tk->type = LIT_INT;
         while (true) {
@@ -144,7 +157,57 @@ static void lex_int_or_num(struct Tk *p_tk, bool found_decimal)
         }
 }
 
-static void set_tk(struct Tk *p_tk)
+static void lex_op_or_assigner(struct tk *p_tk, enum tk_type_group op_type_group,
+                        enum tk_type op_type, enum tk_type assigner_type)
+{
+        char peek_c = src_txt[src_i];
+        if (peek_c == '=') {
+                p_tk->type_group = ASSIGN;
+                p_tk->type = assigner_type;
+                INCPOS();
+        } else {
+                p_tk->type_group = op_type_group;
+                p_tk->type = op_type;
+        }
+}
+
+// ????????????????
+static void lex_op_or_assigner_with_unary(struct tk *p_tk, enum tk_type_group op_type_group,
+                        enum tk_type op_type, enum tk_type op_assign_type)
+{
+        INCPOS();
+        char peek_c = src_txt[src_i];
+        if (peek_c == '=') {
+                p_tk->type_group = OP_ASSIGN;
+                p_tk->type = op_assign_type;
+                INCPOS();
+        } else {
+                p_tk->type_group = op_type_group;
+                p_tk->type = op_type;
+        }
+}
+
+static void lex_keyword_or_identifier(struct tk *p_tk)
+{
+        INCPOS();
+
+        char c = src_txt[src_i];
+        while (isalpha(c) || isdigit(c) || c == '_') {
+                INCPOS();
+                c = src_txt[src_i];
+        }
+        // test this later
+        // remove 'len' from struct? and just make it local?
+        p_tk->len = src_column - p_tk->column;
+        void *keyword_val = hashmap_get(p_tk, p_tk->data, p_tk->len);
+        if (keyword_val != NULL) {
+                p_tk->type;
+        }
+        
+}
+
+// TODO: deal with 'src_i' & 'column'
+static void set_tk(struct tk *p_tk)
 {
         if (src_i == src_len) {
                 p_tk->type_group = MISC;
@@ -155,7 +218,7 @@ static void set_tk(struct Tk *p_tk)
         }
 
         char c;
-        while (isspace(c = src_txt[src_i++])) {
+        while (isspace(c = src_txt[src_i])) {
                 if (c == '\t') {
                         WARN("Tab character '\t' width assumed to be 8 spaces despite ambiguity "
                                 "width which may lead to inaccurate character column numbers in debugging");
@@ -166,6 +229,8 @@ static void set_tk(struct Tk *p_tk)
                 } else
                         INCPOS();
         }
+        // read next char
+        INCPOS();
 
         p_tk->len = 1;
         p_tk->line = src_line;
@@ -173,31 +238,77 @@ static void set_tk(struct Tk *p_tk)
         
         switch (c) {
         case '+':
-                
-        case '-':
-                p_tk->type = ARITH_OP;
                 char peek_c = src_txt[src_i];
-                
-                if (peek_c == c)
-                        p_tk->len++, src_i++;
-        case '/':       
-        case '*':
-                
-                p_tk->type = ARITH_OP;
-        case '-':
-        case '-':
-        case '-':
-        case '-':
-        case '-':
-        case '-':
-          
+                if (peek_c == '+') {
+                        p_tk->type_group = OP_ARITH;
+                        p_tk->type = AROP_INC;
+                        INCPOS();
+                } else if (peek_c == '=') {
+                        p_tk->type_group = OP_ASSIGN;
+                        p_tk->type = ASOP_ADD_EQ;
+                        INCPOS();
+                }
+                break;
         }
-        if (isdigit(c))
-                lex_int_or_num(p_tk, false);
-        else if (c == '.')
-                lex_int_or_num(p_tk, true);
-        else if (isalpha(c))
-                lex_keyword_or_identifier(p_tk);
+        case '-':
+                char peek_c = src_txt[src_i];
+                if (peek_c == '-') {
+                        p_tk->group_type = OP_ARITH;
+                        p_tk->type = AROP_INC;
+                        INCPOS();
+                } else if (peek_c == '=') {
+                        p_tk->group_type = OP_ASSIGN;
+                        p_tk->type = ASOP_ADD_EQ;
+                        INCPOS();
+                }
+                break;
+        case '/':
+                lex_op_or_assigner(p_tk, AROP_DIV, AS_DIV_EQ); break;
+        case '*':
+                lex_op_or_assigner(p_tk, AROP_MUL, AS_MUL_EQ); break;
+        case '!':
+                lex_op_or_assigner(p_tk, LOP_NOT, AS_NOT_EQ); break;
+        case '^':
+                p_tk->type_group = ARITH_OP;
+                p_tk->type = AROP_MUL;
+                break;
+        case '%':
+                p_tk->type_group = ARITH_OP;
+                p_tk->type = AROP_MOD;
+                break;
+        case '!':
+        case '&': {
+                // maybe add incpos before siwtch statement?
+                char peek_c = src_txt[src_i];
+                if (peek_c == '&') {
+                        p_tk->type_group = OP_LOGICAL;
+                        p_tk->type = LOP_AND;
+                } else if (peek_c == '=') {
+                        p_tk->type_group = OP_ASSIGN;
+                        p_tk->type = AS_AND_EQ;
+                } else {
+                        p_tk->type_group = OP_BITWISE:
+                        p_tk->type = BWOP_AND;
+                }
+        }
+        case '|':
+        case '<':
+        case '>':
+        case '?':
+        case ':':
+        case ''':        // 'LIT_CHAR'
+                lex_literal_char(); break;
+        case '"':        // 'LIT_STR'
+                lex_literal_str(); break;
+        default: {
+                if (isdigit(c))
+                        lex_int_or_num(p_tk, false);
+                else if (c == '.')
+                        lex_int_or_num(p_tk, true);
+                else if (isalpha(c) || c == '_')
+                        lex_keyword_or_identifier(p_tk);
+                }
+        }
 }
 
 // should probably rework this to buffer instead of copying into a file
