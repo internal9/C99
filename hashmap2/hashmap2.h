@@ -19,5 +19,5 @@ struct HashMap {
 void hashmap_put(struct HashMap *p_hashmap, const char *key, size_t key_len, void *pvalue);
 void *hashmap_get(struct HashMap *p_hashmap, const char *key, size_t key_len);
 bool hashmap_delete(struct HashMap *p_hashmap, const char *key, size_t key_len);
-void hashmap_init(struct HashMap *p_hashmap, size_t init_size);
+bool hashmap_init(struct HashMap *p_hashmap, size_t init_size);
 #endif
