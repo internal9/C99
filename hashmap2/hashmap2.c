@@ -18,7 +18,7 @@ uint64_t fnv1a_hash(const char *str, size_t str_len)
 	return hash;
 }
 
-static void hashmap_resize(struct HashMap *p_hashmap)
+static bool hashmap_resize(struct HashMap *p_hashmap)
 {
 	struct Bucket *old_buckets = p_hashmap->buckets;
 	size_t old_size = p_hashmap->size;
@@ -28,8 +28,9 @@ static void hashmap_resize(struct HashMap *p_hashmap)
 	if (p_hashmap->buckets == NULL)
 	{
 		free(old_buckets);
-		perror("Failed to allocate memory for buckets during hashmap resize\n");
-		exit(1);
+		return false;
+		// perror("Failed to allocate memory for buckets during hashmap resize");
+		//exit(EXIT_FAILURE);
 	}
 
 	for (size_t i = 0; i < old_size; i++)
@@ -41,6 +42,7 @@ static void hashmap_resize(struct HashMap *p_hashmap)
 		hashmap_put(p_hashmap, old_bucket->key, old_bucket->key_len, old_bucket->pvalue);
 	}
 	free(old_buckets);
+	return true;
 }
 
 void hashmap_put(struct HashMap *p_hashmap, const char *key, size_t key_len, void *pvalue)
