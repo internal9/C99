@@ -111,6 +111,7 @@ bool hashmap_delete(struct HashMap *p_hashmap, const char *key, size_t key_len)
 	if (strncmp(key, bucket->key, key_len) == 0)
 	{
 		bucket->key = NULL;	// yaaa lets just leave the other members as garbage lol
+		bucket->key_len = 0;
 		return true;
 	}
 
@@ -124,6 +125,7 @@ bool hashmap_delete(struct HashMap *p_hashmap, const char *key, size_t key_len)
 		if (strncmp(key, bucket->key, key_len) == 0)
 		{
 			bucket->key = NULL;
+			bucket->key_len = 0;
 			return true;
 		}
 	}
@@ -131,8 +133,9 @@ bool hashmap_delete(struct HashMap *p_hashmap, const char *key, size_t key_len)
 }
 
 // Calloc error handling is up to the programmer
-void init_hashmap(struct HashMap *p_hashmap, size_t init_size)
+bool init_hashmap(struct HashMap *p_hashmap, size_t init_size)
 {
 	p_hashmap->buckets = calloc(init_size * sizeof(struct Bucket),  sizeof(struct Bucket));
 	p_hashmap->size = init_size;
+	return p_hashmap->buckets != NULL;
 }
