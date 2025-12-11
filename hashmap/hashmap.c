@@ -7,9 +7,7 @@
 #include "hashmap.h"
 
 #define MAX_LOAD_FACTOR 80
-#define EMPTY (void*) 0	// NULL is implementation defined
 #define DELETED (void*) -1
-#define HASHMAP_NOVALUE (void*) -2	// Allow for keys that store values of 0
 
 uint64_t fnv1a_hash(const char *str, size_t str_len)
 {
@@ -21,7 +19,7 @@ uint64_t fnv1a_hash(const char *str, size_t str_len)
 	return hash;
 }
 
-static void hashmap_resize(struct HashMap *pmap)
+static bool hashmap_resize(struct HashMap *pmap)
 {
 	struct Bucket *old_buckets = pmap->buckets;
 	size_t old_size = pmap->size;
@@ -31,14 +29,13 @@ static void hashmap_resize(struct HashMap *pmap)
 	if (pmap->buckets == NULL)
 	{
 		free(old_buckets);
-		perror("Failed to allocate memory for buckets during hashmap resize\n");
-		exit(1);
+		return false
 	}
 
 	for (size_t i = 0; i < old_size; i++)
 	{
 		struct Bucket *old_bucket = old_buckets + i;
-		if (old_bucket->key == EMPTY || old_bucket->key == DELETED)
+		if (old_bucket->key == NULL || old_bucket->key == DELETED)
 			continue;
 
 		hashmap_put(pmap, old_bucket->key, old_bucket->key_len, old_bucket->pvalue);
@@ -46,19 +43,20 @@ static void hashmap_resize(struct HashMap *pmap)
 	free(old_buckets);
 }
 
-void hashmap_put(struct HashMap *pmap, const char *key, size_t key_len, void *pvalue)
+bool hashmap_put(struct HashMap *pmap, const char *key, size_t key_len, void *pvalue)
 {
 	uint64_t hash = fnv1a_hash(key, key_len);
 	int load_factor = (int) (pmap->stored  * 100 / pmap->size);
 
 	if (load_factor > MAX_LOAD_FACTOR)
-		hashmap_resize(pmap);
+		if (!hashmap_resize(pmap))
+			return false;
 
 	for (size_t i = 0; i < pmap->size; i++)
 	{
 		struct Bucket *bucket = pmap->buckets + ((hash + i) % pmap->size);
 
-		if (bucket->key == EMPTY || bucket->key == DELETED)
+		if (bucket->key == NULL || bucket->key == DELETED)
 		{
 			bucket->key = key;
 			bucket->key_len = key_len;
@@ -72,6 +70,7 @@ void hashmap_put(struct HashMap *pmap, const char *key, size_t key_len, void *pv
 			break;
 		}
 	}
+	return true;
 }
 
 void *hashmap_get(struct HashMap *pmap, const char *key, size_t key_len)
@@ -81,7 +80,7 @@ void *hashmap_get(struct HashMap *pmap, const char *key, size_t key_len)
 	bucket = pmap->buckets[hash % pmap->size];
 
 	// i might remove this, idk maybe branching makes it slower
-	if (bucket.key == EMPTY)
+	if (bucket.key == NULL)
 		return HASHMAP_NOVALUE;
 
 	if (bucket.key != DELETED && key_len == bucket.key_len &&
@@ -92,13 +91,13 @@ void *hashmap_get(struct HashMap *pmap, const char *key, size_t key_len)
 	for (size_t i = 1; i < pmap->size; i++)
 	{
 		bucket = pmap->buckets[(hash + i) % pmap->size];	// modulo causes wrap around to (hash % size) - 1
-		if (bucket.key == EMPTY || bucket.key == DELETED)
+		if (bucket.key == NULL || bucket.key == DELETED)
 			continue;
 
 		if (key_len == bucket.key_len && strncmp(key, bucket.key, key_len) == 0)
 			return bucket.pvalue;
 	}
-	return HASHMAP_NOVALUE;	// idk if i should use null, since it's implementation defined
+	return HASHMAP_NOVALUE;	
 }
 
 bool hashmap_delete(struct HashMap *pmap, const char *key, size_t key_len)
@@ -107,7 +106,7 @@ bool hashmap_delete(struct HashMap *pmap, const char *key, size_t key_len)
 	struct Bucket *bucket;
 	bucket = pmap->buckets + (hash % pmap->size);
 
-	if (bucket->key == EMPTY)
+	if (bucket->key == NULL)
 		return false;
 
 	if (bucket->key != DELETED && strncmp(key, bucket->key, key_len) == 0)
@@ -120,7 +119,7 @@ bool hashmap_delete(struct HashMap *pmap, const char *key, size_t key_len)
 	for (size_t i = 1; i < pmap->size; i++)
 	{
 		bucket = pmap->buckets + (hash + i) % pmap->size;
-		if (bucket->key == EMPTY || bucket->key == DELETED)
+		if (bucket->key == NULL || bucket->key == DELETED)
 			continue;
 			
 		if (strncmp(key, bucket->key, key_len) == 0)
@@ -140,6 +139,11 @@ bool hashmap_init(struct HashMap *pmap, size_t init_size)
 
 	pmap->size = init_size;
 	return true;
+}
+
+inline void hashmap_free(struct HashMap *pmap)
+{
+	free(pmap->buckets);
 }
 
 // TODO: test it lol
@@ -182,7 +186,7 @@ int main(void)
 	
 	for (int i = 0; i < KEY_COUNT; i++)
 		if (hashmap_get(pmap, strs[i], 7) == HASHMAP_NOVALUE)
-			printf("EMPTY\n");
+			printf("NULL\n");
 
 	free(keys_mem);
 	return 0;
