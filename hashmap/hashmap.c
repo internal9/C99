@@ -132,11 +132,21 @@ bool hashmap_delete(struct HashMap *pmap, const char *key, size_t key_len)
 	return false;
 }
 
+bool hashmap_init(struct HashMap *pmap, size_t init_size)
+{
+	pmap->buckets = calloc(init_size * sizeof(struct bucket), sizeof(struct Bucket));
+	if (pmap->buckets == NULL)
+		return false;
+
+	pmap->size = init_size;
+	return true;
+}
+
 // TODO: test it lol
 int main(void)
 {
 	struct HashMap map = {
-		.buckets = calloc((size_t) HASHMAP_INIT_SIZE * sizeof(struct Bucket),  sizeof(struct Bucket)),
+		.buckets = calloc((size_t) HASHMAP_INIT_SIZE * sizeof(struct Bucket), sizeof(struct Bucket)),
 		.size = (size_t) HASHMAP_INIT_SIZE
 	}, *pmap = &map;
 
