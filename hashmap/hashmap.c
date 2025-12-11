@@ -26,11 +26,9 @@ static bool hashmap_resize(struct HashMap *pmap)
 	pmap->size *= 2;
 	pmap->buckets = calloc(pmap->size * sizeof(struct Bucket), sizeof(struct Bucket));
 
+	// pointers may be stored as values, so let user manually free them before further freeing
 	if (pmap->buckets == NULL)
-	{
-		free(old_buckets);
-		return false
-	}
+		return false;
 
 	for (size_t i = 0; i < old_size; i++)
 	{
