@@ -15,7 +15,7 @@
 #define PERREXIT(...) (fprintf(stderr, __VA_ARGS__), fputs(": ", stderr), perror(NULL), exit(errno))
 #define TAB_WIDTH 8       // Assumption, despite ambiguity 
 
-enum tk_type {
+enum TkType {
         // assignment operators
         OP_AS,
         OP_ADD_AS,
@@ -103,7 +103,7 @@ enum tk_type {
         QUESTION,
 };
 
-enum tk_type_group
+enum TkTypeGroup
 {
         G_OP_ASSIGN,
         G_OP_ARITH,
@@ -114,7 +114,7 @@ enum tk_type_group
         G_MISC
 };
 
-struct tk {
+struct Tk {
         // Add 'type_group' type_str for debugging?
         union {
                 const char *txt;  // Used by 'LIT_STR' & 'IDENTIFIER'
@@ -126,8 +126,8 @@ struct tk {
         long len;
         long line;      // ftell is archaic and returns a 'long', thus 'len' *also* has to be a 'long'
         long column;
-        enum tk_type_group type_group;
-        enum tk_type type;
+        enum TkTypeGroup type_group;
+        enum TkType type;
 };
 
 
@@ -140,7 +140,8 @@ static unsigned char *src_txt;
 
 // NOTE: Might have to change later if wanting variadic args
 #define WARN(msg) printf("WARNING (L%ld C%ld): " msg "\n", src_line, src_column)
-#define ERROR(msg) fprintf(stderr, "ERROR (L%ld C%ld): " msg "\n", src_line, src_column)
+#define LEX_ERR(msg) (fprintf(stderr, "ERROR (L%ld C%ld): " msg "\n", src_line, src_column), exit(EXIT_FAILURE))
+#define LEX_ERR_FMT(msg, ...) (fprintf(stderr, "ERROR (L%ld C%ld): " msg "\n", src_line, src_column, __VA_ARGS__), exit(EXIT_FAILURE))
 
 // NOTE: May remove macros and use a variable to just set both of these once per token lexed
 #define INCPOS() (src_i++, src_column++)
@@ -148,21 +149,32 @@ static unsigned char *src_txt;
 #define GET_C() src_txt[src_i]
 
 // support octal integers?
-static void lex_bin_int(struct tk *p_tk)
+static void lex_bin_int(struct Tk *p_tk)
 {
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
+        p_tk->value.int_v = 0;
 	
         unsigned char c = GET_C();	
         if (c != '0' || c != '1')
-                ERROR("Expected digits after binary integer prefix.");
+                LEX_ERR("Expected digits after binary integer prefix.");
 
-        do {
-                if (!isdigit(c));
-        } while (c);
+        for (int i = 0; i < 64; i++) {
+                INCPOS();
+                c = GET_C();
+                if (c != '0' || c != '1')
+                        return;
+
+                p_tk->value.int_v <<= 1 | (c - '0');
+        }
+
+        INCPOS();
+        c = GET_C();
+        if (c == '0' || c == '1')
+                LEX_ERR("Binary integer literal exceeds 64 digits, above 64-bit range");
 }
 
-static void lex_hex_int(struct tk *p_tk)
+static void lex_hex_int(struct Tk *p_tk)
 {
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
@@ -170,7 +182,7 @@ static void lex_hex_int(struct tk *p_tk)
 
         unsigned char c = GET_C();
         if (!isdigit(c))
-                ERROR("Expected digits after hexadecimal integer literal prefix.");
+                LEX_ERR("Expected digits after hexadecimal integer literal prefix.");
 
         for (int i = 0; i < 8; i++) {
                 INCPOS();
@@ -191,10 +203,10 @@ static void lex_hex_int(struct tk *p_tk)
                 
         INCPOS();
         if (isxdigit(GET_C()))
-                ERROR("Hexadecimal integer literal exceeds 8 digits, above 64-bit range");
+                LEX_ERR("Hexadecimal integer literal exceeds 8 digits, above 64-bit range");
 }
 
-static void lex_dec_int_or_num(struct tk *p_tk, bool found_decimal)
+static void lex_dec_int_or_num(struct Tk *p_tk, bool found_decimal)
 {
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
@@ -213,8 +225,8 @@ static void lex_dec_int_or_num(struct tk *p_tk, bool found_decimal)
         }
 }
 
-static void lex_op_other_or_assign(struct tk *p_tk, enum tk_type_group op_type_group,
-                        enum tk_type op_type, enum tk_type assigner_type)
+static void lex_op_other_or_assign(struct Tk *p_tk, enum TkTypeGroup op_type_group,
+                        enum TkType op_type, enum TkType assigner_type)
 {
         if (GET_C() == '=') {
                 p_tk->type_group = G_OP_ASSIGN;
@@ -228,7 +240,7 @@ static void lex_op_other_or_assign(struct tk *p_tk, enum tk_type_group op_type_g
 
 // will finish
 /*
-static void lex_keyword_or_identifier(struct tk *p_tk)
+static void lex_keyword_or_identifier(struct Tk *p_tk)
 {
         unsigned char c = src_txt[src_i];
         while (isalpha(c) || isdigit(c) || c == '_') {
@@ -247,15 +259,15 @@ static void lex_keyword_or_identifier(struct tk *p_tk)
 */
 
 // Only *ascii* chars will be supported, may be changed to *utf-8*, and allow wide chars
-static void lex_literal_char(struct tk *p_tk)
+static void lex_literal_char(struct Tk *p_tk)
 {
         unsigned char c = GET_C();
         if (!isalpha(c) || c != '_')
-                ERROR("Non-ASCII characters are unsupported.");
+                LEX_ERR("Non-ASCII characters are unsupported.");
 
         INCPOS();
         if (GET_C() != '\'')
-                ERROR("Expected ''' to end character literal.");
+                LEX_ERR("Expected ''' to end character literal.");
 
         INCPOS();
         p_tk->type_group = G_LITERAL;
@@ -263,12 +275,12 @@ static void lex_literal_char(struct tk *p_tk)
         p_tk->value.c = c;
 }
 
-static void lex_literal_str(struct tk *p_tk)
+static void lex_literal_str(struct Tk *p_tk)
 {
 
 }
 
-static void lex_keyword_or_identifier(struct tk *p_tk)
+static void lex_keyword_or_identifier(struct Tk *p_tk)
 {
 
 }
@@ -277,7 +289,7 @@ static void handle_whitespace(void) {
         unsigned char c;
         while (isspace(c = GET_C())) {
                 if (c == '\t') {
-                        WARN("Tab character '\t' width assumed to be 8 spaces despite ambiguity "
+                        WARN("Tab character '\\t' width assumed to be 8 spaces despite ambigious "
                                 "width which may lead to inaccurate character column numbers in debugging");
                         ADDPOS(TAB_WIDTH);
                 } else if (c == '\n') {
@@ -298,7 +310,7 @@ static void handle_multi_line_comment(void)
 
 }
 // TODO: deal with 'src_i' & 'column'
-static void lex_next(struct tk *p_tk)
+static void lex_next(struct Tk *p_tk)
 {
         if (src_i == src_len) {
                 p_tk->type_group = G_MISC;
@@ -455,9 +467,24 @@ static void lex_next(struct tk *p_tk)
                         lex_dec_int_or_num(p_tk, false);
                 else if (isalpha(c))
                         lex_keyword_or_identifier(p_tk);
+                else
+                        // Should have more debugging, to handle non-printable characters
+                        // Default argument promotions promote 'c' to 'int', but explicitness just to be fine
+                        if (isprint(c))
+                                LEX_ERR_FMT("Invalid symbol '%c', character code of %d", c, (int) c);
+                        else
+                                LEX_ERR_FMT("Invalid non-printable symbol, character code of %d", (int) c);
         }
 }
 
+static void gen_bytecode_file(void)
+{
+        struct Tk tk; 
+        lex_next(&tk);
+
+        // debug
+        printf("TOKEN TYPE: %d\n", tk.type);
+}
 
 // should probably rework this to buffer instead of copying into a file
 static void init_src_file(FILE *src_file)
@@ -513,6 +540,6 @@ int main(int argc, const char *argv[])
                 PERREXIT("Failed to open source file");
 
         init_src_file(src_file);
-        //      gen_bytecode_file();
+        gen_bytecode_file();
         return EXIT_SUCCESS;
 }
