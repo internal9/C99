@@ -117,7 +117,7 @@ enum TkTypeGroup
 struct Tk {
         // Add 'type_group' type_str for debugging?
         union {
-                const char *txt;  // Used by 'LIT_STR' & 'IDENTIFIER'
+                const unsigned char *txt;  // Used by 'LIT_STR' & 'IDENTIFIER'
                 int64_t int_v;         // Used by 'LIT_INT'
                 double fp_v;           // Used by 'LIT_FP'
                 unsigned char c;                // Used by 'LIT_CHAR'
@@ -140,12 +140,12 @@ static unsigned char *src_txt;
 
 // NOTE: Might have to change later if wanting variadic args
 #define WARN(msg) printf("WARNING (L%ld C%ld): " msg "\n", src_line, src_column)
+#define WARN_FMT(msg, ...) printf("WARNING (L%ld C%ld): " msg "\n", src_line, src_column, __VA_ARGS__)
 #define LEX_ERR(msg) (fprintf(stderr, "ERROR (L%ld C%ld): " msg "\n", src_line, src_column), exit(EXIT_FAILURE))
 #define LEX_ERR_FMT(msg, ...) (fprintf(stderr, "ERROR (L%ld C%ld): " msg "\n", src_line, src_column, __VA_ARGS__), exit(EXIT_FAILURE))
 
 // NOTE: May remove macros and use a variable to just set both of these once per token lexed
 #define INCPOS() (src_i++, src_column++)
-#define ADDPOS(n) (src_i += n, src_column += n)
 #define GET_C() src_txt[src_i]
 
 // support octal integers?
@@ -206,23 +206,41 @@ static void lex_hex_int(struct Tk *p_tk)
                 LEX_ERR("Hexadecimal integer literal exceeds 8 digits, above 64-bit range");
 }
 
-static void lex_dec_int_or_num(struct Tk *p_tk, bool found_decimal)
+static void lex_num_using_int(struct Tk *p_tk, bool is_negative)
+{
+        p_tk->type_group = G_LITERAL;
+        p_tk->type = LIT_NUM;
+
+        
+}
+
+static void lex_dec_int_or_num(struct Tk *p_tk, bool is_negative)
 {
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
 
         unsigned char c;
-        while (true) {
+        {
                 c = GET_C();
-                if (c == '.' && !found_decimal) {
+                if (isdigit(c)) {
+                        p_tk->value.int_v *= 10 + (c - '0');
+                        INCPOS();
+                } else if (c == '.') {
                         found_decimal = true;
                         p_tk->type = LIT_NUM;
                         INCPOS();
-                } else if (isdigit(c))
-                        INCPOS();
-                else
+
+                        lex_num_using_int(p_tk);
+                        break;
+                } else
                         break;
         }
+}
+
+// TODO: Handle negative numbers and make lexing nums / ints clean
+static void lex_int_or_num(struct Tk *p_tk)
+{
+
 }
 
 static void lex_op_other_or_assign(struct Tk *p_tk, enum TkTypeGroup op_type_group,
@@ -282,16 +300,20 @@ static void lex_literal_str(struct Tk *p_tk)
 
 static void lex_keyword_or_identifier(struct Tk *p_tk)
 {
-
+        p_tk->value.txt = src_txt + src_i;
+        INCPOS();
 }
 
+// whitespace characters are non-printable characters that define text layouts
 static void handle_whitespace(void) {
         unsigned char c;
         while (isspace(c = GET_C())) {
                 if (c == '\t') {
-                        WARN("Tab character '\\t' width assumed to be 8 spaces despite ambigious "
-                                "width which may lead to inaccurate character column numbers in debugging");
-                        ADDPOS(TAB_WIDTH);
+                        WARN_FMT("Tab character '\\t' width assumed to be %d spaces despite ambigious "
+                                 "width and interpration, may lead to inaccurate lexing column numbers",
+                                 TAB_WIDTH);
+                        src_i++;
+                        src_column += TAB_WIDTH;
                 } else if (c == '\n') {
                         src_line++;
                         src_column = 0;
@@ -300,38 +322,31 @@ static void handle_whitespace(void) {
         }
 }
 
-static void handle_line_comment(void)
+static inline void handle_line_comment(void)
 {
-        while (GET_C() != '\n' || src_i != src_len);
+        while (GET_C() != '\n' || GET_C() != '\0')
+                INCPOS();
 }
 
 static void handle_multi_line_comment(void)
 {
 
 }
+
 // TODO: deal with 'src_i' & 'column'
+// IDK: find a way to clean up repititve code
 static void lex_next(struct Tk *p_tk)
 {
-        if (src_i == src_len) {
-                p_tk->type_group = G_MISC;
-                p_tk->type = END;
-                p_tk->line = src_line;
-                p_tk->column = src_column;
-                return;
-        }
-
         handle_whitespace();
         unsigned char c = GET_C();
 
         // next char after 'c'
-        INCPOS();
-
-        p_tk->len = 1;
         p_tk->line = src_line;
         p_tk->column = src_column;
         
         switch (c) {
         case '+':
+                INCPOS();
                 if (GET_C() == '+') {
                         INCPOS();
                         p_tk->type_group = G_OP_ARITH;
@@ -340,14 +355,18 @@ static void lex_next(struct Tk *p_tk)
                         lex_op_other_or_assign(p_tk, G_OP_ARITH, OP_SUB, OP_SUB_AS);
                 break;
         case '-':
+                INCPOS();
                 if (GET_C() == '-') {
                         INCPOS();
                         p_tk->type_group = G_OP_ARITH;
                         p_tk->type = OP_DEC;
-                } else
+                } else if (isdigit(GET_C()))
+                        lex_dec_int_or_num(p_tk, true);
+                else
                         lex_op_other_or_assign(p_tk, G_OP_ARITH, OP_SUB, OP_SUB_AS);
                 break;
         case '/':
+                INCPOS();
                 if (GET_C() == '/')
                         handle_line_comment();
                 else if (GET_C() == '*')
@@ -356,9 +375,11 @@ static void lex_next(struct Tk *p_tk)
                         lex_op_other_or_assign(p_tk, G_OP_ARITH, OP_DIV, OP_DIV_AS);
                 break;
         case '*':
+                INCPOS();
                 lex_op_other_or_assign(p_tk, G_OP_ARITH, OP_MUL, OP_MUL_AS);
                 break;
         case '!':
+                INCPOS();
                 if (GET_C() == '=') {
                         INCPOS();
                         p_tk->type_group = G_OP_LOGICAL;
@@ -369,6 +390,7 @@ static void lex_next(struct Tk *p_tk)
                 } 
                 break;
         case '^':
+                INCPOS();
                 if (GET_C() == '^') {
                         INCPOS();
                         lex_op_other_or_assign(p_tk, G_OP_BITWISE, OP_BXOR, OP_BXOR_AS);
@@ -376,10 +398,12 @@ static void lex_next(struct Tk *p_tk)
                         lex_op_other_or_assign(p_tk, G_OP_ARITH, OP_POW, OP_POW_AS);
                 break;
         case '%':
+                INCPOS();
                 lex_op_other_or_assign(p_tk, G_OP_ARITH, OP_MOD, OP_MOD_AS);
                 break;
-        case '&': {
-                // maybe add incpos before siwtch statement?
+        case '&':
+                INCPOS();
+                // maybe add incpos before switch statement?
                 if (GET_C() == '&') {
                         INCPOS();
                         p_tk->type_group = G_OP_LOGICAL;
@@ -387,8 +411,8 @@ static void lex_next(struct Tk *p_tk)
                 } else
                         lex_op_other_or_assign(p_tk, G_OP_BITWISE, OP_BAND, OP_BAND);
                 break;
-        }
         case '|':
+                INCPOS();
                 if (GET_C() == '|') {
                         INCPOS();
                         p_tk->type_group = G_OP_LOGICAL;
@@ -397,6 +421,7 @@ static void lex_next(struct Tk *p_tk)
                         lex_op_other_or_assign(p_tk, G_OP_BITWISE, OP_BOR, OP_BOR_AS);
                 break;
         case '<':
+                INCPOS();
                 if (GET_C() == '<') {
                         INCPOS();
                         lex_op_other_or_assign(p_tk, G_OP_BITWISE, OP_BSHL, OP_BSHL_AS);
@@ -412,6 +437,7 @@ static void lex_next(struct Tk *p_tk)
                 }
                 break;
         case '>':
+                INCPOS();
                 if (GET_C() == '>') {
                         INCPOS();
                         lex_op_other_or_assign(p_tk, G_OP_BITWISE, OP_BSHR, OP_BSHR_AS);
@@ -427,14 +453,17 @@ static void lex_next(struct Tk *p_tk)
                 }
                 break;
         case '?':
+                INCPOS();
                 p_tk->type_group = G_MISC;
                 p_tk->type = QUESTION;
                 break;
         case ':':
+                INCPOS();
                 p_tk->type_group = G_MISC;
                 p_tk->type = COLON;
                 break;
         case '\'':        // 'LIT_CHAR'
+                INCPOS();
                 lex_literal_char(p_tk);
                 break;
         case '"':        // 'LIT_STR'
@@ -451,16 +480,23 @@ static void lex_next(struct Tk *p_tk)
                         lex_dec_int_or_num(p_tk, false);
                 break;
         case '.':
-                if (isdigit(GET_C())) {
-                        INCPOS();
-                        lex_dec_int_or_num(p_tk, true);
-                } else {
+                INCPOS();
+                if (isdigit(GET_C()))
+                        lex_dec_int_or_num(p_tk, false);
+                else {
                         p_tk->type_group = G_MISC;
                         p_tk->type = PERIOD;
                 }
                 break;
         case '_':
                 lex_keyword_or_identifier(p_tk);
+                break;
+        case '\0':
+                if (src_i != src_len)
+                        printf("assad %ld %ld ||", src_i, src_len), LEX_ERR("Null terminator '\\0' should be at end of file");
+
+                p_tk->type_group = G_MISC;
+                p_tk->type = END;
                 break;
         default:
                 if (isdigit(c))
@@ -473,7 +509,7 @@ static void lex_next(struct Tk *p_tk)
                         if (isprint(c))
                                 LEX_ERR_FMT("Invalid symbol '%c', character code of %d", c, (int) c);
                         else
-                                LEX_ERR_FMT("Invalid non-printable symbol, character code of %d", (int) c);
+                                printf("raa: %ld %ld || ", src_i, src_len), LEX_ERR_FMT("Invalid non-printable symbol, character code of %d", (int) c);
         }
 }
 
@@ -500,7 +536,7 @@ static void init_src_file(FILE *src_file)
                 goto read_err;
 
         // I would use a VLA but I can't gracefully handle those errors if a stack overflow happens
-        if ((src_txt = malloc((size_t) src_len)) == NULL)
+        if ((src_txt = malloc((size_t) (src_len + 1))) == NULL)
                 goto read_err;
 
         fread(src_txt, 1, (size_t) src_len, src_file);
@@ -521,8 +557,10 @@ read_err:
 read_success:
         if (fclose(src_file) != 0) {
                 free(src_txt);
-                perror("Failed to close source file");          
+                PERREXIT("Failed to close source file");
         }
+
+        src_txt[src_len] = '\0';
 
         // debug
         printf("Source file size: %ld\n", src_len);
