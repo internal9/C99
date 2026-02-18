@@ -1,5 +1,6 @@
-/*
-  Option that doesn't exit compilation on error
+/* NOTES
+  - Option that doesn't exit compilation on error
+  - Don't lex integer or number using '-' symbol, treat '-' as an operator (unary & binary) consistently
 */
 
 #include <stdlib.h>
