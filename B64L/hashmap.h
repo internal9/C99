@@ -1,3 +1,5 @@
+// bucket values of either 'int' or 'void *'
+
 #ifndef HASHMAP_H
 #define HASHMAP_H
 
