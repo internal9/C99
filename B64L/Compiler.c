@@ -1,10 +1,12 @@
 /* NOTES
   - Option that doesn't exit compilation on error
-  - Don't lex integer or number using '-' symbol, treat '-' as an operator (unary & binary) consistently
+n  - Don't lex integer or number using '-' symbol, treat '-' as an operator (unary & binary) consistently
+  - Fix
 */
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <ctype.h>
 #include <stdint.h>
 #include <errno.h>
@@ -118,10 +120,10 @@ enum TkTypeGroup
 struct Tk {
         // Add 'type_group' type_str for debugging?
         union {
-                const unsigned char *txt;  // Used by 'LIT_STR' & 'IDENTIFIER'
+                char *txt;  // Used by 'LIT_STR' & 'IDENTIFIER'
                 int64_t int_v;         // Used by 'LIT_INT'
                 double fp_v;           // Used by 'LIT_FP'
-                unsigned char c;                // Used by 'LIT_CHAR'
+                char c;                // Used by 'LIT_CHAR'
         } value;
         const char *type_str;
         long len;
@@ -137,7 +139,7 @@ static long src_line = 0;
 static long src_column = 0;
 static long src_i = 0;
 static long src_len;
-static unsigned char *src_txt;
+static char *src_txt;
 
 // NOTE: Might have to change later if wanting variadic args
 #define WARN(msg) printf("WARNING (L%ld C%ld): " msg "\n", src_line, src_column)
@@ -147,6 +149,8 @@ static unsigned char *src_txt;
 
 // NOTE: May remove macros and use a variable to just set both of these once per token lexed
 #define INCPOS() (src_i++, src_column++)
+#define DECPOS() (src_i--, src_column--)
+#define SET_POS(pos) (src_i = pos, src_column = pos)
 #define GET_C() src_txt[src_i]
 
 // support octal integers?
@@ -156,9 +160,9 @@ static void lex_bin_int(struct Tk *p_tk)
         p_tk->type = LIT_INT;
         p_tk->value.int_v = 0;
 	
-        unsigned char c = GET_C();	
+        char c = GET_C();	
         if (c != '0' || c != '1')
-                LEX_ERR("Expected digits after binary integer prefix.");
+                LEX_ERR("Expected binary digits after binary integer prefix '0b'.");
 
         for (int i = 0; i < 64; i++) {
                 INCPOS();
@@ -181,7 +185,7 @@ static void lex_hex_int(struct Tk *p_tk)
         p_tk->type = LIT_INT;
         p_tk->value.int_v = 0;
 
-        unsigned char c = GET_C();
+        char c = GET_C();
         if (!isdigit(c))
                 LEX_ERR("Expected digits after hexadecimal integer literal prefix.");
 
@@ -207,42 +211,88 @@ static void lex_hex_int(struct Tk *p_tk)
                 LEX_ERR("Hexadecimal integer literal exceeds 8 digits, above 64-bit range");
 }
 
-static void lex_num_using_int(struct Tk *p_tk, bool is_negative)
+/*
+  IF 'non-fractional_int' is true (1000% sure there is no *decimal point*,
+  resulting from attempting to lex an int that would've *overflowed*)
+
+  CHECK for *suffix* 'f', otherwise error, assuming an attempt at lexing a massive 'int'
+*/
+static void lex_num(struct Tk *p_tk)
 {
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_NUM;
 
-        
+        // handle decimal point being found when parsing an integer
+
+        // IF success 'src_txt' is advanced beyond the lexed num
+        errno = 0;
+
+        char *num_src_txt_end;
+        p_tk->value.fp_v = strtod(src_txt + src_i, &num_src_txt_end);
+
+        bool non_fractional = strchr(src_txt + src_i, '.') == NULL;
+
+        // point to *last digit* instead incase of overflow debugging error messages
+        SET_POS((num_src_txt_end - src_txt) - 1);
+
+        // assume a very large 'int' was attempted to be lexed
+        if (non_fractional) {
+                if (*num_src_txt_end != 'f')
+                        LEX_ERR("64-bit integer literal overflow");
+
+                INCPOS();
+        }
+
+        if (errno == ERANGE)
+                LEX_ERR("floating-point number overflow");
+
+        INCPOS();
+        printf("fp value: %.35f\n", p_tk->value.fp_v);
 }
 
-static void lex_dec_int_or_num(struct Tk *p_tk, bool is_negative)
+// probably need a more robust integer lexer
+static void lex_dec_int_or_num(struct Tk *p_tk)
 {
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
 
-        unsigned char c;
-        {
-                c = GET_C();
-                if (isdigit(c)) {
-                        p_tk->value.int_v *= 10 + (c - '0');
-                        INCPOS();
-                } else if (c == '.') {
-                        found_decimal = true;
-                        p_tk->type = LIT_NUM;
-                        INCPOS();
+        long int_src_i_start = src_i;
 
-                        lex_num_using_int(p_tk);
-                        break;
-                } else
-                        break;
+        char c;
+        while (true) {
+                c = GET_C();
+                if (c == '.')
+                        goto try_lex_num;
+
+                if (c == 'f')
+                        goto try_lex_num;
+
+                if (!isdigit(c)) {
+                        printf("int value: %ld\n", p_tk->value.int_v);
+                        return;
+                }
+
+                if (p_tk->value.int_v > INT64_MAX / 10) { printf("asd\n");
+                        goto try_lex_num;}
+
+                // C standard guarantees decimal digits are in order
+                p_tk->value.int_v *= 10;
+                if (p_tk->value.int_v > INT64_MAX - (c - '0'))
+                        goto try_lex_num;
+
+                p_tk->value.int_v += (c - '0');
+                INCPOS();
         }
+
+try_lex_num:
+        p_tk->value.fp_v = 0;
+
+        // to allow rereading previous digit(s)
+        src_i = int_src_i_start;
+        lex_num(p_tk);
 }
 
 // TODO: Handle negative numbers and make lexing nums / ints clean
-static void lex_int_or_num(struct Tk *p_tk)
-{
-
-}
 
 static void lex_op_other_or_assign(struct Tk *p_tk, enum TkTypeGroup op_type_group,
                         enum TkType op_type, enum TkType assigner_type)
@@ -257,11 +307,12 @@ static void lex_op_other_or_assign(struct Tk *p_tk, enum TkTypeGroup op_type_gro
         }
 }
 
+// temp to remove warnings
 // will finish
-/*
 static void lex_keyword_or_identifier(struct Tk *p_tk)
 {
-        unsigned char c = src_txt[src_i];
+        p_tk->value.txt = src_txt + src_i;
+        char c = src_txt[src_i];
         while (isalpha(c) || isdigit(c) || c == '_') {
                 INCPOS();
                 c = GET_C();
@@ -269,18 +320,19 @@ static void lex_keyword_or_identifier(struct Tk *p_tk)
         // test this later
         // remove 'len' from struct? and just make it local?
         p_tk->len = src_column - p_tk->column;
-        void *keyword_val = hashmap_get(p_tk, p_tk->data, p_tk->len);
+        void *keyword_val = hashmap_get(keywords_map, p_tk->value.txt, p_tk->len);
         if (keyword_val != NULL) {
-                p_tk->type;
+                p_tk->type_group = G_MISC;
+                p_tk->type = IDENTIFIER;
         }
         
 }
-*/
+
 
 // Only *ascii* chars will be supported, may be changed to *utf-8*, and allow wide chars
 static void lex_literal_char(struct Tk *p_tk)
 {
-        unsigned char c = GET_C();
+        char c = GET_C();
         if (!isalpha(c) || c != '_')
                 LEX_ERR("Non-ASCII characters are unsupported.");
 
@@ -307,7 +359,7 @@ static void lex_keyword_or_identifier(struct Tk *p_tk)
 
 // whitespace characters are non-printable characters that define text layouts
 static void handle_whitespace(void) {
-        unsigned char c;
+        char c;
         while (isspace(c = GET_C())) {
                 if (c == '\t') {
                         WARN_FMT("Tab character '\\t' width assumed to be %d spaces despite ambigious "
@@ -339,7 +391,7 @@ static void handle_multi_line_comment(void)
 static void lex_next(struct Tk *p_tk)
 {
         handle_whitespace();
-        unsigned char c = GET_C();
+        char c = GET_C();
 
         // next char after 'c'
         p_tk->line = src_line;
@@ -361,8 +413,7 @@ static void lex_next(struct Tk *p_tk)
                         INCPOS();
                         p_tk->type_group = G_OP_ARITH;
                         p_tk->type = OP_DEC;
-                } else if (isdigit(GET_C()))
-                        lex_dec_int_or_num(p_tk, true);
+                }
                 else
                         lex_op_other_or_assign(p_tk, G_OP_ARITH, OP_SUB, OP_SUB_AS);
                 break;
@@ -478,12 +529,15 @@ static void lex_next(struct Tk *p_tk)
                         INCPOS();
                         lex_bin_int(p_tk);
                 } else
-                        lex_dec_int_or_num(p_tk, false);
+                        lex_dec_int_or_num(p_tk);
                 break;
         case '.':
                 INCPOS();
-                if (isdigit(GET_C()))
-                        lex_dec_int_or_num(p_tk, false);
+                if (isdigit(GET_C())) {
+                        // allow for period to be read since fractions
+                        DECPOS();
+                        lex_num(p_tk);
+                }
                 else {
                         p_tk->type_group = G_MISC;
                         p_tk->type = PERIOD;
@@ -501,7 +555,7 @@ static void lex_next(struct Tk *p_tk)
                 break;
         default:
                 if (isdigit(c))
-                        lex_dec_int_or_num(p_tk, false);
+                        lex_dec_int_or_num(p_tk);
                 else if (isalpha(c))
                         lex_keyword_or_identifier(p_tk);
                 else
@@ -516,7 +570,8 @@ static void lex_next(struct Tk *p_tk)
 
 static void gen_bytecode_file(void)
 {
-        struct Tk tk; 
+        struct Tk tk;
+        memset(&tk, 0, sizeof(struct Tk));
         lex_next(&tk);
 
         // debug
