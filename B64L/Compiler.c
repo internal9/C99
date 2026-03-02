@@ -1,4 +1,5 @@
 /* NOTES
+  - add a makefile loll
   - Option that doesn't exit compilation on error
 n  - Don't lex integer or number using '-' symbol, treat '-' as an operator (unary & binary) consistently
   - Fix
