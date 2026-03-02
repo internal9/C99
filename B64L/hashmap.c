@@ -1,0 +1,228 @@
+//
+
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include "hashmap.h"
+
+#define MAX_LOAD_FACTOR 80
+
+uint64_t fnv1a_hash(const char *str, size_t str_len)
+{
+    uint64_t hash = 0xcbf29ce484222325;
+    static const uint64_t fnvprime = 0x100000001b3;
+
+	for (size_t i = 0; i < str_len; i++)
+		hash ^= (uint64_t) str[i], hash *= fnvprime;
+	return hash;
+}
+
+static void hashmap_put_value_union(struct HashMap *p_hashmap, const char *key, size_t key_len, union Value value)
+{
+	uint64_t hash = fnv1a_hash(key, key_len);
+
+	for (size_t i = 0; i < p_hashmap->size; i++)
+	{
+		struct Bucket *bucket = p_hashmap->buckets + ((hash + i) % p_hashmap->size);
+
+		if (bucket->key == NULL)
+		{
+			bucket->key = key;
+			bucket->key_len = key_len;
+			bucket->value = value;
+			// p_hashmap->stored++;
+			break;
+		}
+		else if (strncmp(key, bucket->key, key_len) == 0)
+		{
+			bucket->value = value;
+			break;
+		}
+	}
+}
+
+static bool hashmap_resize(struct HashMap *p_hashmap)
+{
+	struct Bucket *old_buckets = p_hashmap->buckets;
+	size_t old_size = p_hashmap->size;
+	p_hashmap->size *= 2;
+	p_hashmap->buckets = calloc(p_hashmap->size * sizeof(struct Bucket), sizeof(struct Bucket));
+
+        // failed to allocate memory for new buckets
+	if (p_hashmap->buckets == NULL)
+	{
+		free(old_buckets);
+		return false;
+	}
+
+	for (size_t i = 0; i < old_size; i++)
+	{
+		struct Bucket *old_bucket = old_buckets + i;
+		if (old_bucket->key == NULL)
+			continue;
+
+		hashmap_put_value_union(p_hashmap, old_bucket->key, old_bucket->key_len, old_bucket->value);
+	}
+
+	free(old_buckets);
+	return true;
+}
+
+bool hashmap_put_ptr(struct HashMap *p_hashmap, const char *key, size_t key_len, void *ptr_v)
+{
+	uint64_t hash = fnv1a_hash(key, key_len);
+	int load_factor = (int) (p_hashmap->stored  * 100 / p_hashmap->size);
+
+	if (load_factor > MAX_LOAD_FACTOR)
+		if (!hashmap_resize(p_hashmap))
+                        return false;
+
+	for (size_t i = 0; i < p_hashmap->size; i++)
+	{
+		struct Bucket *bucket = p_hashmap->buckets + ((hash + i) % p_hashmap->size);
+
+		if (bucket->key == NULL)
+		{
+			bucket->key = key;
+			bucket->key_len = key_len;
+			bucket->value.ptr_v = ptr_v;
+			p_hashmap->stored++;
+			break;
+		}
+		else if (strncmp(key, bucket->key, key_len) == 0)
+		{
+			bucket->value.ptr_v = ptr_v;
+			break;
+		}
+	}
+
+        return true;
+}
+
+bool hashmap_put_int(struct HashMap *p_hashmap, const char *key, size_t key_len, int int_v)
+{
+	uint64_t hash = fnv1a_hash(key, key_len);
+	int load_factor = (int) (p_hashmap->stored  * 100 / p_hashmap->size);
+
+ 	if (load_factor > MAX_LOAD_FACTOR)
+		if (!hashmap_resize(p_hashmap))
+                        return false;
+
+	for (size_t i = 0; i < p_hashmap->size; i++)
+	{
+		struct Bucket *bucket = p_hashmap->buckets + ((hash + i) % p_hashmap->size);
+
+		if (bucket->key == NULL)
+		{
+			bucket->key = key;
+			bucket->key_len = key_len;
+			bucket->value.int_v = int_v;
+			p_hashmap->stored++;
+			break;
+		}
+		else if (strncmp(key, bucket->key, key_len) == 0)
+		{
+			bucket->value.int_v = int_v;
+			break;
+		}
+	}
+
+        return true;
+}
+
+void *hashmap_get_ptr(struct HashMap *p_hashmap, const char *key, size_t key_len)
+{
+	uint64_t hash = fnv1a_hash(key, key_len);
+	struct Bucket bucket = p_hashmap->buckets[hash % p_hashmap->size];
+
+	// i might remove this, idk maybe branching makes it slower
+	if (bucket.key == NULL)
+		return NULL;
+
+	if (key_len == bucket.key_len && strncmp(key, bucket.key, key_len) == 0)
+		return bucket.value.ptr_v;
+
+	// there must be a collision, some other key hashed to the same index
+	for (size_t i = 1; i < p_hashmap->size; i++)
+	{
+		bucket = p_hashmap->buckets[(hash + i) % p_hashmap->size];	// modulo causes wrap around to (hash % size) - 1
+		if (bucket.key == NULL)
+			continue;
+
+		if (key_len == bucket.key_len && strncmp(key, bucket.key, key_len) == 0)
+			return bucket.value.ptr_v;
+	}
+	// None found
+	return NULL;
+}
+
+int hashmap_get_int(struct HashMap *p_hashmap, const char *key, size_t key_len)
+{
+	uint64_t hash = fnv1a_hash(key, key_len);
+	struct Bucket bucket = p_hashmap->buckets[hash % p_hashmap->size];
+
+	// i might remove this, idk maybe branching makes it slower
+	if (bucket.key == NULL)
+		return -1;
+
+	if (key_len == bucket.key_len && strncmp(key, bucket.key, key_len) == 0)
+		return bucket.value.int_v;
+
+	// there must be a collision, some other key hashed to the same index
+	for (size_t i = 1; i < p_hashmap->size; i++)
+	{
+		bucket = p_hashmap->buckets[(hash + i) % p_hashmap->size];	// modulo causes wrap around to (hash % size) - 1
+		if (bucket.key == NULL)
+			continue;
+
+		if (key_len == bucket.key_len && strncmp(key, bucket.key, key_len) == 0)
+			return bucket.value.int_v;
+	}
+	// None found
+	return -1;
+}
+
+// Returns a bool indicating if delete succeeded
+bool hashmap_delete(struct HashMap *p_hashmap, const char *key, size_t key_len)
+{
+	uint64_t hash = fnv1a_hash(key, key_len);
+	struct Bucket *bucket;
+	bucket = p_hashmap->buckets + (hash % p_hashmap->size);
+
+	if (bucket->key == NULL)
+		return false;
+
+	if (strncmp(key, bucket->key, key_len) == 0)
+	{
+		bucket->key = NULL;	// yaaa lets just leave the other members as garbage lol
+		bucket->key_len = 0;
+		return true;
+	}
+
+	// there must be a collision, some other key hashed to the same index
+	for (size_t i = 1; i < p_hashmap->size; i++)
+	{
+		bucket = p_hashmap->buckets + (hash + i) % p_hashmap->size;
+		if (bucket->key == NULL)
+			continue;
+			
+		if (strncmp(key, bucket->key, key_len) == 0)
+		{
+			bucket->key = NULL;
+			bucket->key_len = 0;
+			return true;
+		}
+	}
+	return false;
+}
+
+// Calloc error handling is up to the programmer
+bool hashmap_init(struct HashMap *p_hashmap, size_t init_size)
+{
+	p_hashmap->buckets = calloc(init_size * sizeof(struct Bucket),  sizeof(struct Bucket));
+	p_hashmap->size = init_size;
+	return p_hashmap->buckets != NULL;
+}

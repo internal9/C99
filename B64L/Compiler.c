@@ -11,6 +11,7 @@ n  - Don't lex integer or number using '-' symbol, treat '-' as an operator (una
 #include <stdint.h>
 #include <errno.h>
 #include <stdbool.h>
+#include "hashmap.h"
 
 // Gonna put these parameterized macros into header files
 // 'ERREXIT' & 'PERREXIT' expect *string literals* as the first argument format
@@ -140,6 +141,13 @@ static long src_column = 0;
 static long src_i = 0;
 static long src_len;
 static char *src_txt;
+
+static const char* keywords[] = {
+        "bool", "char", "int", "num",
+        "array", "string", "struct",
+};
+
+static struct HashMap keywords_hashmap;
 
 // NOTE: Might have to change later if wanting variadic args
 #define WARN(msg) printf("WARNING (L%ld C%ld): " msg "\n", src_line, src_column)
@@ -320,8 +328,9 @@ static void lex_keyword_or_identifier(struct Tk *p_tk)
         // test this later
         // remove 'len' from struct? and just make it local?
         p_tk->len = src_column - p_tk->column;
-        void *keyword_val = hashmap_get(keywords_map, p_tk->value.txt, p_tk->len);
-        if (keyword_val != NULL) {
+
+        int keyword_type_enum = hashmap_get_int(&keywords_hashmap, p_tk->value.txt, (size_t) p_tk->len);
+        if (keyword_type_enum != -1) {
                 p_tk->type_group = G_MISC;
                 p_tk->type = IDENTIFIER;
         }
@@ -349,12 +358,6 @@ static void lex_literal_char(struct Tk *p_tk)
 static void lex_literal_str(struct Tk *p_tk)
 {
 
-}
-
-static void lex_keyword_or_identifier(struct Tk *p_tk)
-{
-        p_tk->value.txt = src_txt + src_i;
-        INCPOS();
 }
 
 // whitespace characters are non-printable characters that define text layouts
@@ -622,6 +625,14 @@ read_success:
         printf("Source file size: %ld\n", src_len);
 }
 
+static void init_lexer(void)
+{
+        hashmap_init(&keywords_hashmap, HASHMAP_INIT_SIZE);
+        for (int i = 0; i < (int) (sizeof keywords / sizeof *keywords); i++)
+                hashmap_put_int(&keywords_hashmap, keywords[i], strlen(keywords[i]),
+                                (int) KW_BOOL + i);
+}
+
 // barebones for testing purposes
 int main(int argc, const char *argv[])
 {
@@ -633,7 +644,9 @@ int main(int argc, const char *argv[])
                 // ?: Maybe don't assume that errno is set?
                 PERREXIT("Failed to open source file");
 
+        init_lexer();
         init_src_file(src_file);
+        
         gen_bytecode_file();
         return EXIT_SUCCESS;
 }
