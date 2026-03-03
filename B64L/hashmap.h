@@ -1,3 +1,4 @@
+// ?: probably simplify put and get functions in 'hashmap.c'
 // bucket values of either 'int' or 'void *'
 
 #ifndef HASHMAP_H
