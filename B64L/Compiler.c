@@ -1,6 +1,4 @@
 /* NOTES
-  - focus on lexing identifiers & keywords
-  - add a makefile loll
   - Option that doesn't exit compilation on error
 n  - Don't lex integer or number using '-' symbol, treat '-' as an operator (unary & binary) consistently
   - Fix
@@ -96,7 +94,7 @@ enum TkType {
           or are only ones serving *unique* purposes
         */
         IDENTIFIER,        
-        END,
+        END, // aka 'eof' but conflicts with C macros
         PAREN_L,
         PAREN_R,
         BRACKET_L,
@@ -319,6 +317,7 @@ static void lex_op_other_or_assign(struct Tk *p_tk, enum TkTypeGroup op_type_gro
 
 // temp to remove warnings
 // will finish
+// test this later
 static void lex_keyword_or_identifier(struct Tk *p_tk)
 {
         p_tk->value.txt = src_txt + src_i;
@@ -327,16 +326,27 @@ static void lex_keyword_or_identifier(struct Tk *p_tk)
                 INCPOS();
                 c = GET_C();
         }
-        // test this later
-        // remove 'len' from struct? and just make it local?
-        p_tk->len = src_column - p_tk->column;
 
-        int keyword_type_enum = hashmap_get_int(&keywords_hashmap, p_tk->value.txt, (size_t) p_tk->len);
-        if (keyword_type_enum != -1) {
+        int keyword_type_enum = hashmap_get_int(&keywords_hashmap,
+                                                p_tk->value.txt,(size_t) p_tk->len);
+
+        // -1 means key *not found*
+        if (keyword_type_enum == -1) {
                 p_tk->type_group = G_MISC;
                 p_tk->type = IDENTIFIER;
+                // remove 'len' from struct? and just make it local?
+                p_tk->len = src_column - p_tk->column;
+
+                // debug
+                printf("identifier len: %ld, value: ", p_tk->len);
+                for (int i = 0; i < p_tk->len; i++)
+                        putchar(p_tk->value.txt[i]);
+                putchar('\n');
         }
-        
+        else {
+                p_tk->type_group = G_KEYWORD;
+                p_tk->type = (enum TkType) keyword_type_enum;
+        }
 }
 
 
@@ -374,6 +384,7 @@ static void handle_whitespace(void) {
                         src_column += TAB_WIDTH;
                 } else if (c == '\n') {
                         src_line++;
+                        src_i++;
                         src_column = 0;
                 } else
                         INCPOS();
@@ -631,6 +642,7 @@ static void init_lexer(void)
 {
         hashmap_init(&keywords_hashmap, HASHMAP_INIT_SIZE);
         for (int i = 0; i < (int) (sizeof keywords / sizeof *keywords); i++)
+                // Keyword enums are in order startiing from 'KW_BOOL'
                 hashmap_put_int(&keywords_hashmap, keywords[i], strlen(keywords[i]),
                                 (int) KW_BOOL + i);
 }
