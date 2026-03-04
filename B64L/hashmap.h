@@ -28,4 +28,5 @@ void *hashmap_get_ptr(struct HashMap *p_hashmap, const char *key, size_t key_len
 int hashmap_get_int(struct HashMap *p_hashmap, const char *key, size_t key_len);
 bool hashmap_delete(struct HashMap *p_hashmap, const char *key, size_t key_len);
 bool hashmap_init(struct HashMap *p_hashmap, size_t init_size);
+void hashmap_free(struct HashMap *p_hashmap);
 #endif
