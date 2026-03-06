@@ -162,7 +162,7 @@ static struct HashMap keywords_hashmap;
 // NOTE: May remove macros and use a variable to just set both of these once per token lexed
 #define INCPOS() (src_i++, src_column++)
 #define DECPOS() (src_i--, src_column--)
-#define SET_POS(pos) (src_i = pos, src_column = pos)
+#define SET_POS(pos) (src_i = pos, src_column = (src_i - pos))
 #define GET_C() src_txt[src_i]
 
 // support octal integers?
@@ -174,7 +174,7 @@ static void lex_bin_int(struct Tk *p_tk)
 	
         char c = GET_C();	
         if (c != '0' || c != '1')
-                LEX_ERR("Expected binary digits after binary integer prefix '0b'.");
+                LEX_ERR("Expected binary digits after binary integer literal prefix '0b'.");
 
         for (int i = 0; i < 64; i++) {
                 INCPOS();
@@ -379,15 +379,24 @@ static void lex_literal_char(struct Tk *p_tk)
 
 static void lex_literal_str(struct Tk *p_tk)
 {
-        char c = GET_C();
+        long src_i_start = src_i;
+        char c;
+
+        while ((c = GET_C()) != '\"') {
+                if (c == '\0')
+                        LEX_ERR("Expected double quote character '\"' to"
+                                "end string literal");
+                INCPOS();
+        }
+
+        SET_POS(src_i_start);
+
         while (isalnum(c) || isspace(c) || ispunct(c)) {
                 INCPOS();
                 c = GET_C();
         }
 
         printf("%c\n", c);
-        if (c != '\"')
-                LEX_ERR("Expected double quote character '\"' to end string literal");
 }
 
 // whitespace characters are non-printable characters that define text layouts
@@ -432,6 +441,18 @@ static void lex_next(struct Tk *p_tk)
         p_tk->column = src_column;
         
         switch (c) {
+        case '=':
+                INCPOS();
+                if (GET_C() == '=') {
+                        INCPOS();
+                        p_tk->type_group = G_OP_LOGICAL;
+                        p_tk->type = OP_EQ;
+                }
+                else {
+                        p_tk->type_group = G_OP_ASSIGN;
+                        p_tk->type = OP_AS;
+                }
+                break;
         case '+':
                 INCPOS();
                 if (GET_C() == '+') {
@@ -469,10 +490,10 @@ static void lex_next(struct Tk *p_tk)
                 if (GET_C() == '=') {
                         INCPOS();
                         p_tk->type_group = G_OP_LOGICAL;
-                        p_tk->type = OP_BNOT_AS;
+                        p_tk->type = OP_NOT_EQ;
                 } else {
                         p_tk->type_group = G_OP_LOGICAL;
-                        p_tk->type = OP_BNOT;
+                        p_tk->type = OP_NOT;
                 } 
                 break;
         case '^':
