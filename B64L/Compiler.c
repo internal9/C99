@@ -1,4 +1,8 @@
 /* NOTES
+   - Some time later, format escape sequences, which *might* require *txt* union member of 'struct Tk' to be changed to a char value since the src_txt escape sequences are unforatted and just chars, bla bla bla
+   
+   - Include token src_column start and line for better debugging
+
   - Option that doesn't exit compilation on error
 n  - Don't lex integer or number using '-' symbol, treat '-' as an operator (unary & binary) consistently
   - Fix
@@ -327,15 +331,17 @@ static void lex_keyword_or_identifier(struct Tk *p_tk)
                 c = GET_C();
         }
 
+                p_tk->len = src_column - p_tk->column;
         int keyword_type_enum = hashmap_get_int(&keywords_hashmap,
-                                                p_tk->value.txt,(size_t) p_tk->len);
+                                                p_tk->value.txt, (size_t) p_tk->len);
 
+        printf("enum: %d\n", keyword_type_enum);
         // -1 means key *not found*
         if (keyword_type_enum == -1) {
                 p_tk->type_group = G_MISC;
                 p_tk->type = IDENTIFIER;
                 // remove 'len' from struct? and just make it local?
-                p_tk->len = src_column - p_tk->column;
+
 
                 // debug
                 printf("identifier len: %ld, value: ", p_tk->len);
@@ -354,7 +360,11 @@ static void lex_keyword_or_identifier(struct Tk *p_tk)
 static void lex_literal_char(struct Tk *p_tk)
 {
         char c = GET_C();
-        if (!isalpha(c) || c != '_')
+        printf("ch: %c\n", c);
+
+        if (c == '\'')
+                LEX_ERR("Character literal cannot be empty");
+        if (!isalnum(c) && !isspace(c) && !ispunct(c) && c != '_')
                 LEX_ERR("Non-ASCII characters are unsupported.");
 
         INCPOS();
@@ -369,7 +379,15 @@ static void lex_literal_char(struct Tk *p_tk)
 
 static void lex_literal_str(struct Tk *p_tk)
 {
+        char c = GET_C();
+        while (isalnum(c) || isspace(c) || ispunct(c)) {
+                INCPOS();
+                c = GET_C();
+        }
 
+        printf("%c\n", c);
+        if (c != '\"')
+                LEX_ERR("Expected double quote character '\"' to end string literal");
 }
 
 // whitespace characters are non-printable characters that define text layouts
@@ -662,5 +680,7 @@ int main(int argc, const char *argv[])
         init_src_file(src_file);
         
         gen_bytecode_file();
+
+        hashmap_free(&keywords_hashmap);
         return EXIT_SUCCESS;
 }
