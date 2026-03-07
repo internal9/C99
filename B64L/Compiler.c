@@ -1,4 +1,7 @@
 /* NOTES
+   - probably error handle malloc
+   - for 'lex_literal_str' handle *THE SOURCE's* line feeds (not the chars) for multiline strings
+   - LOLL do i *even* need malloc for tk 'txt' member? sure i might have to write a function to read escape sequences for strings, not even that bad bruh!!!
    - Some time later, format escape sequences, which *might* require *txt* union member of 'struct Tk' to be changed to a char value since the src_txt escape sequences are unforatted and just chars, bla bla bla
    
    - Include token src_column start and line for better debugging
@@ -140,7 +143,7 @@ struct Tk {
 
 
 
-static long src_line = 0;
+static long src_line = 1;
 static long src_column = 0;
 static long src_i = 0;
 static long src_len;
@@ -162,8 +165,11 @@ static struct HashMap keywords_hashmap;
 // NOTE: May remove macros and use a variable to just set both of these once per token lexed
 #define INCPOS() (src_i++, src_column++)
 #define DECPOS() (src_i--, src_column--)
-#define SET_POS(pos) (src_i = pos, src_column = (src_i - pos))
+// left operand is guaranteed evaluation *1st*
+#define SET_POS(pos) (src_column += (pos - src_i), src_i = pos)
 #define GET_C() src_txt[src_i]
+#define NEXT_C() src_txt[src_i + 1]
+#define PREV_C() src_txt[src_i - 1]
 
 // support octal integers?
 static void lex_bin_int(struct Tk *p_tk)
@@ -300,11 +306,9 @@ try_lex_num:
         p_tk->value.fp_v = 0;
 
         // to allow rereading previous digit(s)
-        src_i = int_src_i_start;
+        SET_POS(int_src_i_start);
         lex_num(p_tk);
 }
-
-// TODO: Handle negative numbers and make lexing nums / ints clean
 
 static void lex_op_other_or_assign(struct Tk *p_tk, enum TkTypeGroup op_type_group,
                         enum TkType op_type, enum TkType assigner_type)
@@ -324,30 +328,33 @@ static void lex_op_other_or_assign(struct Tk *p_tk, enum TkTypeGroup op_type_gro
 // test this later
 static void lex_keyword_or_identifier(struct Tk *p_tk)
 {
-        p_tk->value.txt = src_txt + src_i;
+        //        p_tk->value.txt
+        char *txt_start = src_txt + src_i;
+
         char c = src_txt[src_i];
         while (isalpha(c) || isdigit(c) || c == '_') {
                 INCPOS();
                 c = GET_C();
         }
 
-                p_tk->len = src_column - p_tk->column;
+        size_t len = (size_t) (src_column - p_tk->column);
+        // do i even *need* a 'len'?
+        //        p_tk->len = src_column - p_tk->column;
         int keyword_type_enum = hashmap_get_int(&keywords_hashmap,
-                                                p_tk->value.txt, (size_t) p_tk->len);
+                                                txt_start, len);
 
         printf("enum: %d\n", keyword_type_enum);
         // -1 means key *not found*
         if (keyword_type_enum == -1) {
                 p_tk->type_group = G_MISC;
                 p_tk->type = IDENTIFIER;
-                // remove 'len' from struct? and just make it local?
-
-
+                p_tk->value.txt = malloc(len + 1);
+                p_tk->value.txt[len] = '\0';
+                memcpy(p_tk->value.txt, txt_start, len);
+                
                 // debug
-                printf("identifier len: %ld, value: ", p_tk->len);
-                for (int i = 0; i < p_tk->len; i++)
-                        putchar(p_tk->value.txt[i]);
-                putchar('\n');
+                printf("id value: %s\n", p_tk->value.txt);
+                // debug end
         }
         else {
                 p_tk->type_group = G_KEYWORD;
@@ -377,26 +384,75 @@ static void lex_literal_char(struct Tk *p_tk)
         p_tk->value.c = c;
 }
 
+// IF invalid char for escape sequence, '0' is returned
+static inline char esc_seq_from_char(char c)
+{
+        switch (c) {
+        case 'n': return '\n';
+        case 't': return '\t';
+        case '\\': return '\\';
+        case '\'': return '\'';
+        case '"': return '"';
+        default: return 0;
+        }
+}
+
+
+// so efficient!
 static void lex_literal_str(struct Tk *p_tk)
 {
         long src_i_start = src_i;
+        long escape_seq_count = 0;
         char c;
 
-        while ((c = GET_C()) != '\"') {
-                if (c == '\0')
-                        LEX_ERR("Expected double quote character '\"' to"
-                                "end string literal");
+        // starts on the char after the beginning '"'
+        while ((c = GET_C()) != '"') {
+                if (c == '\0' || c == '\n') {
+                        // read at last char of string
+                        DECPOS();
+                        LEX_ERR("Unfinished string literal.");
+                }
+                if (c == '\\') {
+                        c = NEXT_C();
+                        escape_seq_count++;
+                        if (c != '\0' && c != '\n')
+                                INCPOS();
+                }
                 INCPOS();
         }
 
+        // why
+        long len = (src_i - src_i_start) - escape_seq_count;
+        p_tk->value.txt = malloc((size_t) len + 1);
+        p_tk->value.txt[len] = '\0';
+
+        printf("len: %ld\n", len);
         SET_POS(src_i_start);
 
-        while (isalnum(c) || isspace(c) || ispunct(c)) {
-                INCPOS();
+        for (long i = 0; i < len; i++) {
                 c = GET_C();
+                printf("%ld, CHAR: %c\n", i, c);
+
+                if (c == '\\') {
+                        INCPOS();
+                        c = GET_C();
+                        char esc_char = esc_seq_from_char(c);
+                        if (esc_char == 0)
+                                LEX_ERR("Invalid escape sequence");
+                                
+                        p_tk->value.txt[i] = esc_char;
+                }
+                // prob needs rework idk for other special chars
+                else {
+                        if (!isalnum(c) && !isspace(c) && !ispunct(c))
+                                LEX_ERR("Invalid character in string literal");
+                        p_tk->value.txt[i] = c;
+                }
+                INCPOS();
         }
 
-        printf("%c\n", c);
+        printf("str: %s  the len: %lu\n",
+               p_tk->value.txt, strlen(p_tk->value.txt));
 }
 
 // whitespace characters are non-printable characters that define text layouts
@@ -574,6 +630,7 @@ static void lex_next(struct Tk *p_tk)
                 lex_literal_char(p_tk);
                 break;
         case '"':        // 'LIT_STR'
+                INCPOS();
                 lex_literal_str(p_tk);
                 break;
         case '0':
@@ -628,6 +685,7 @@ static void gen_bytecode_file(void)
         struct Tk tk;
         memset(&tk, 0, sizeof(struct Tk));
         lex_next(&tk);
+        
 
         // debug
         printf("TOKEN TYPE: %d\n", tk.type);
