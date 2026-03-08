@@ -23,7 +23,7 @@ n  - Don't lex integer or number using '-' symbol, treat '-' as an operator (una
 // Gonna put these parameterized macros into header files
 // 'ERREXIT' & 'PERREXIT' expect *string literals* as the first argument format
 #define ERREXIT(...) (fprintf(stderr, __VA_ARGS__), putc('\n', stderr), exit(EXIT_FAILURE))     // macro 'putc', yeah just don't have expressions wide side effects and you'lll be fine!!!!
-#define PERREXIT(...) (fprintf(stderr, __VA_ARGS__), fputs(": ", stderr), perror(NULL), exit(errno))
+#define PERREXIT(...) (fprintf(stderr, __VA_ARGS__), fputs(": ", stderr), perror(NULL), exit(EXIT_FAILURE))
 #define TAB_WIDTH 8       // Assumption, despite ambiguity 
 
 enum TkType {
@@ -177,7 +177,6 @@ static void lex_bin_int(struct Tk *p_tk)
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
         p_tk->value.int_v = 0;
-	
         char c = GET_C();	
         if (c != '0' || c != '1')
                 LEX_ERR("Expected binary digits after binary integer literal prefix '0b'.");
@@ -202,7 +201,6 @@ static void lex_hex_int(struct Tk *p_tk)
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
         p_tk->value.int_v = 0;
-
         char c = GET_C();
         if (!isdigit(c))
                 LEX_ERR("Expected digits after hexadecimal integer literal prefix.");
@@ -239,17 +237,11 @@ static void lex_num(struct Tk *p_tk)
 {
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_NUM;
-
-        // handle decimal point being found when parsing an integer
-
         // IF success 'src_txt' is advanced beyond the lexed num
         errno = 0;
-
         char *num_src_txt_end;
         p_tk->value.fp_v = strtod(src_txt + src_i, &num_src_txt_end);
-
         bool non_fractional = strchr(src_txt + src_i, '.') == NULL;
-
         // point to *last digit* instead incase of overflow debugging error messages
         SET_POS((num_src_txt_end - src_txt) - 1);
 
@@ -260,12 +252,9 @@ static void lex_num(struct Tk *p_tk)
 
                 INCPOS();
         }
-
         if (errno == ERANGE)
                 LEX_ERR("floating-point number overflow");
-
         INCPOS();
-        printf("fp value: %.35f\n", p_tk->value.fp_v);
 }
 
 // probably need a more robust integer lexer
@@ -273,7 +262,6 @@ static void lex_dec_int_or_num(struct Tk *p_tk)
 {
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
-
         long int_src_i_start = src_i;
 
         char c;
@@ -281,30 +269,24 @@ static void lex_dec_int_or_num(struct Tk *p_tk)
                 c = GET_C();
                 if (c == '.')
                         goto try_lex_num;
-
                 if (c == 'f')
                         goto try_lex_num;
-
                 if (!isdigit(c)) {
                         printf("int value: %ld\n", p_tk->value.int_v);
                         return;
                 }
-
                 if (p_tk->value.int_v > INT64_MAX / 10) { printf("asd\n");
                         goto try_lex_num;}
-
                 // C standard guarantees decimal digits are in order
                 p_tk->value.int_v *= 10;
                 if (p_tk->value.int_v > INT64_MAX - (c - '0'))
                         goto try_lex_num;
-
                 p_tk->value.int_v += (c - '0');
                 INCPOS();
         }
 
 try_lex_num:
         p_tk->value.fp_v = 0;
-
         // to allow rereading previous digit(s)
         SET_POS(int_src_i_start);
         lex_num(p_tk);
@@ -328,33 +310,24 @@ static void lex_op_other_or_assign(struct Tk *p_tk, enum TkTypeGroup op_type_gro
 // test this later
 static void lex_keyword_or_identifier(struct Tk *p_tk)
 {
-        //        p_tk->value.txt
         char *txt_start = src_txt + src_i;
-
-        char c = src_txt[src_i];
+        char c = GET_C();
         while (isalpha(c) || isdigit(c) || c == '_') {
                 INCPOS();
                 c = GET_C();
         }
-
         size_t len = (size_t) (src_column - p_tk->column);
-        // do i even *need* a 'len'?
-        //        p_tk->len = src_column - p_tk->column;
         int keyword_type_enum = hashmap_get_int(&keywords_hashmap,
                                                 txt_start, len);
-
-        printf("enum: %d\n", keyword_type_enum);
         // -1 means key *not found*
         if (keyword_type_enum == -1) {
                 p_tk->type_group = G_MISC;
                 p_tk->type = IDENTIFIER;
                 p_tk->value.txt = malloc(len + 1);
+                if (p_tk->value.txt == NULL)
+                        LEX_ERR("Failed memory alloc for keyword");
                 p_tk->value.txt[len] = '\0';
                 memcpy(p_tk->value.txt, txt_start, len);
-                
-                // debug
-                printf("id value: %s\n", p_tk->value.txt);
-                // debug end
         }
         else {
                 p_tk->type_group = G_KEYWORD;
@@ -367,17 +340,13 @@ static void lex_keyword_or_identifier(struct Tk *p_tk)
 static void lex_literal_char(struct Tk *p_tk)
 {
         char c = GET_C();
-        printf("ch: %c\n", c);
-
         if (c == '\'')
                 LEX_ERR("Character literal cannot be empty");
         if (!isalnum(c) && !isspace(c) && !ispunct(c) && c != '_')
                 LEX_ERR("Non-ASCII characters are unsupported.");
-
         INCPOS();
         if (GET_C() != '\'')
                 LEX_ERR("Expected ''' to end character literal.");
-
         INCPOS();
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_CHAR;
@@ -404,7 +373,7 @@ static void lex_literal_str(struct Tk *p_tk)
         long src_i_start = src_i;
         long escape_seq_count = 0;
         char c;
-
+        
         // starts on the char after the beginning '"'
         while ((c = GET_C()) != '"') {
                 if (c == '\0' || c == '\n') {
@@ -424,22 +393,19 @@ static void lex_literal_str(struct Tk *p_tk)
         // why
         long len = (src_i - src_i_start) - escape_seq_count;
         p_tk->value.txt = malloc((size_t) len + 1);
+        if (p_tk->value.txt == NULL)
+                LEX_ERR("Failed memory alloc for string literal");
         p_tk->value.txt[len] = '\0';
-
-        printf("len: %ld\n", len);
         SET_POS(src_i_start);
 
         for (long i = 0; i < len; i++) {
                 c = GET_C();
-                printf("%ld, CHAR: %c\n", i, c);
-
                 if (c == '\\') {
                         INCPOS();
                         c = GET_C();
                         char esc_char = esc_seq_from_char(c);
                         if (esc_char == 0)
                                 LEX_ERR("Invalid escape sequence");
-                                
                         p_tk->value.txt[i] = esc_char;
                 }
                 // prob needs rework idk for other special chars
@@ -450,9 +416,6 @@ static void lex_literal_str(struct Tk *p_tk)
                 }
                 INCPOS();
         }
-
-        printf("str: %s  the len: %lu\n",
-               p_tk->value.txt, strlen(p_tk->value.txt));
 }
 
 // whitespace characters are non-printable characters that define text layouts
@@ -491,7 +454,6 @@ static void lex_next(struct Tk *p_tk)
 {
         handle_whitespace();
         char c = GET_C();
-
         // next char after 'c'
         p_tk->line = src_line;
         p_tk->column = src_column;
@@ -644,13 +606,10 @@ static void lex_next(struct Tk *p_tk)
                         lex_dec_int_or_num(p_tk);
                 break;
         case '.':
-                INCPOS();
-                if (isdigit(GET_C())) {
-                        // allow for period to be read since fractions
-                        DECPOS();
+                // no incpos, 'lex_num' needs to read '.' for fraction
+                if (isdigit(NEXT_C()))
                         lex_num(p_tk);
-                }
-                else {
+               else {
                         p_tk->type_group = G_MISC;
                         p_tk->type = PERIOD;
                 }
@@ -660,7 +619,7 @@ static void lex_next(struct Tk *p_tk)
                 break;
         case '\0':
                 if (src_i != src_len)
-                        printf("assad %ld %ld ||", src_i, src_len), LEX_ERR("Null terminator '\\0' should be at end of file");
+                        LEX_ERR("Null terminator '\\0' should be at end of file");
 
                 p_tk->type_group = G_MISC;
                 p_tk->type = END;
@@ -697,17 +656,13 @@ static void init_src_file(FILE *src_file)
         // fseek & ftell for portability to windows too ig???
         if (fseek(src_file, 0, SEEK_END) != 0)
                 goto read_err;
-
         if ((src_len = ftell(src_file)) == -1L)
                 goto read_err;
-
         if (fseek(src_file, 0, SEEK_SET) != 0)  // heard setting it to start is safe, i'm paranoid tho
                 goto read_err;
-
         // I would use a VLA but I can't gracefully handle those errors if a stack overflow happens
         if ((src_txt = malloc((size_t) (src_len + 1))) == NULL)
                 goto read_err;
-
         fread(src_txt, 1, (size_t) src_len, src_file);
         if (ferror(src_file))
                 goto read_err;
@@ -719,18 +674,14 @@ read_err:
         perror("Failed to read source file");
 
         if (fclose(src_file) != 0)
-                perror("Failed to close source file");
-
-        exit(EXIT_FAILURE);
+                PERREXIT("Failed to close source file");
         
 read_success:
         if (fclose(src_file) != 0) {
                 free(src_txt);
                 PERREXIT("Failed to close source file");
         }
-
         src_txt[src_len] = '\0';
-
         // debug
         printf("Source file size: %ld\n", src_len);
 }
@@ -749,17 +700,13 @@ int main(int argc, const char *argv[])
 {
         if (argc != 2)
                 ERREXIT("Expected one source file to compile to bytecode");
-
         FILE *src_file = fopen(argv[1], "r");
         if (src_file == NULL)
                 // ?: Maybe don't assume that errno is set?
                 PERREXIT("Failed to open source file");
-
         init_lexer();
         init_src_file(src_file);
-        
         gen_bytecode_file();
-
         hashmap_free(&keywords_hashmap);
         return EXIT_SUCCESS;
 }
