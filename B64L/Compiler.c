@@ -1,4 +1,5 @@
 /* NOTES
+   - use a global ptr for char instead of 10 billion char variables?
    - probably error handle malloc
    - for 'lex_literal_str' handle *THE SOURCE's* line feeds (not the chars) for multiline strings
    - LOLL do i *even* need malloc for tk 'txt' member? sure i might have to write a function to read escape sequences for strings, not even that bad bruh!!!
@@ -214,10 +215,9 @@ static void lex_hex_int(struct Tk *p_tk)
                 case 'e': case 'E': p_tk->value.int_v <<= 4 | 14; break;
                 case 'f': case 'F': p_tk->value.int_v <<= 4 | 15; break;
                 default:
-                        if (isdigit(c))
-                                p_tk->value.int_v <<= 4 | (c - '0');
-                        else
+                        if (!isdigit(c))
                                 return;
+                        p_tk->value.int_v <<= 4 | (c - '0');
                 }
         }
         INCPOS();
@@ -247,7 +247,6 @@ static void lex_num(struct Tk *p_tk)
         if (non_fractional) {
                 if (*num_src_txt_end != 'f')
                         LEX_ERR("64-bit integer literal overflow");
-
                 INCPOS();
         }
         if (errno == ERANGE)
@@ -375,7 +374,7 @@ static void lex_literal_str(struct Tk *p_tk)
                         DECPOS();
                         LEX_ERR("Unfinished string literal.");
                 }
-                if (c == '\\') {
+                else if (c == '\\') {
                         c = NEXT_C();
                         escape_seq_count++;
                         if (c != '\0' && c != '\n')
@@ -411,14 +410,20 @@ static void lex_literal_str(struct Tk *p_tk)
         }
 }
 
+static inline void warn_tab_char(void)
+{
+        WARN_FMT("Tab character '\\t' width assumed to be %d spaces despite ambigious "
+                 "width and interpration, may lead to inaccurate lexing column numbers",
+                 TAB_WIDTH);
+}
+
 // whitespace characters are non-printable characters that define text layouts
-static void handle_whitespace(void) {
+static void handle_whitespace(void)
+{
         char c;
-        while (isspace(c = GET_C())) {
+        while (isspace(c = GET_C()))
                 if (c == '\t') {
-                        WARN_FMT("Tab character '\\t' width assumed to be %d spaces despite ambigious "
-                                 "width and interpration, may lead to inaccurate lexing column numbers",
-                                 TAB_WIDTH);
+                        warn_tab_char();
                         src_i++;
                         src_column += TAB_WIDTH;
                 } else if (c == '\n') {
@@ -427,18 +432,24 @@ static void handle_whitespace(void) {
                         src_column = 0;
                 } else
                         INCPOS();
-        }
 }
 
 static inline void handle_line_comment(void)
 {
-        while (GET_C() != '\n' || GET_C() != '\0')
-                INCPOS();
+        for (char c = GET_C(); c != '\n' || c != '\0'; c = GET_C())
+                if (c == '\t') {
+                        warn_tab_char();
+                        src_i++;
+                        src_column += TAB_WIDTH;
+                }
+                else
+                        INCPOS();
 }
 
 static void handle_multi_line_comment(void)
 {
-
+        for (char c = GET_C(); c != '* && NEXT_C() != '/; c = GET_C())
+                
 }
 
 // TODO: deal with 'src_i' & 'column'
@@ -613,7 +624,6 @@ static void lex_next(struct Tk *p_tk)
         case '\0':
                 if (src_i != src_len)
                         LEX_ERR("Null terminator '\\0' should be at end of file");
-
                 p_tk->type_group = G_MISC;
                 p_tk->type = END;
                 break;
@@ -678,7 +688,7 @@ read_success:
         printf("Source file size: %ld\n", src_len);
 }
 
-static void init_lexer(void)
+static inline void init_keywords_map(void)
 {
         hashmap_init(&keywords_hashmap, HASHMAP_INIT_SIZE);
         for (int i = 0; i < (int) (sizeof keywords / sizeof *keywords); i++)
@@ -697,7 +707,7 @@ int main(int argc, const char *argv[])
                 // ?: Maybe don't assume that errno is set?
                 PERREXIT("Failed to open source file");
 
-        init_lexer();
+        init_keywords_map();
         init_src_file(src_file);
         gen_bytecode_file();
         hashmap_free(&keywords_hashmap);
