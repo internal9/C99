@@ -189,7 +189,6 @@ static void lex_bin_int(struct Tk *p_tk)
 
                 p_tk->value.int_v <<= 1 | (c - '0');
         }
-
         INCPOS();
         c = GET_C();
         if (c == '0' || c == '1')
@@ -221,7 +220,6 @@ static void lex_hex_int(struct Tk *p_tk)
                                 return;
                 }
         }
-                
         INCPOS();
         if (isxdigit(GET_C()))
                 LEX_ERR("Hexadecimal integer literal exceeds 8 digits, above 64-bit range");
@@ -263,7 +261,6 @@ static void lex_dec_int_or_num(struct Tk *p_tk)
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
         long int_src_i_start = src_i;
-
         char c;
         while (true) {
                 c = GET_C();
@@ -326,6 +323,7 @@ static void lex_keyword_or_identifier(struct Tk *p_tk)
                 p_tk->value.txt = malloc(len + 1);
                 if (p_tk->value.txt == NULL)
                         LEX_ERR("Failed memory alloc for keyword");
+
                 p_tk->value.txt[len] = '\0';
                 memcpy(p_tk->value.txt, txt_start, len);
         }
@@ -373,7 +371,6 @@ static void lex_literal_str(struct Tk *p_tk)
         long src_i_start = src_i;
         long escape_seq_count = 0;
         char c;
-        
         // starts on the char after the beginning '"'
         while ((c = GET_C()) != '"') {
                 if (c == '\0' || c == '\n') {
@@ -395,12 +392,12 @@ static void lex_literal_str(struct Tk *p_tk)
         p_tk->value.txt = malloc((size_t) len + 1);
         if (p_tk->value.txt == NULL)
                 LEX_ERR("Failed memory alloc for string literal");
+
         p_tk->value.txt[len] = '\0';
         SET_POS(src_i_start);
 
         for (long i = 0; i < len; i++) {
-                c = GET_C();
-                if (c == '\\') {
+                if ((c = GET_C()) == '\\') {
                         INCPOS();
                         c = GET_C();
                         char esc_char = esc_seq_from_char(c);
@@ -672,7 +669,6 @@ static void init_src_file(FILE *src_file)
 read_err:
         free(src_txt);
         perror("Failed to read source file");
-
         if (fclose(src_file) != 0)
                 PERREXIT("Failed to close source file");
         
@@ -704,6 +700,7 @@ int main(int argc, const char *argv[])
         if (src_file == NULL)
                 // ?: Maybe don't assume that errno is set?
                 PERREXIT("Failed to open source file");
+
         init_lexer();
         init_src_file(src_file);
         gen_bytecode_file();
