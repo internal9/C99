@@ -264,9 +264,7 @@ static void lex_dec_int_or_num(struct Tk *p_tk)
         char c;
         while (true) {
                 c = GET_C();
-                if (c == '.')
-                        goto try_lex_num;
-                if (c == 'f')
+                if (c == '.' || c == 'f')
                         goto try_lex_num;
                 if (!isdigit(c)) {
                         printf("int value: %ld\n", p_tk->value.int_v);
@@ -323,7 +321,6 @@ static void lex_keyword_or_identifier(struct Tk *p_tk)
                 p_tk->value.txt = malloc(len + 1);
                 if (p_tk->value.txt == NULL)
                         LEX_ERR("Failed memory alloc for keyword");
-
                 p_tk->value.txt[len] = '\0';
                 memcpy(p_tk->value.txt, txt_start, len);
         }
@@ -392,7 +389,6 @@ static void lex_literal_str(struct Tk *p_tk)
         p_tk->value.txt = malloc((size_t) len + 1);
         if (p_tk->value.txt == NULL)
                 LEX_ERR("Failed memory alloc for string literal");
-
         p_tk->value.txt[len] = '\0';
         SET_POS(src_i_start);
 
