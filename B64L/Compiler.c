@@ -1,4 +1,5 @@
 /* NOTES
+   - prob seperate into lex & codegen file
    - use a global ptr for char instead of 10 billion char variables?
    - probably error handle malloc
    - for 'lex_literal_str' handle *THE SOURCE's* line feeds (not the chars) for multiline strings
