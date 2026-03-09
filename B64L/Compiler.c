@@ -1,5 +1,5 @@
 /* NOTES
-   - prob seperate into lex & codegen file
+   - handle hashmaping freeing after lex_err
    - use a global ptr for char instead of 10 billion char variables?
    - probably error handle malloc
    - for 'lex_literal_str' handle *THE SOURCE's* line feeds (not the chars) for multiline strings
@@ -435,7 +435,7 @@ static void handle_whitespace(void)
                         INCPOS();
 }
 
-static inline void handle_line_comment(void)
+static void handle_line_comment(void)
 {
         for (char c = GET_C(); c != '\n' || c != '\0'; c = GET_C())
                 if (c == '\t') {
@@ -449,7 +449,14 @@ static inline void handle_line_comment(void)
 
 static void handle_multi_line_comment(void)
 {
-        for (char c = GET_C(); c != '* && NEXT_C() != '/; c = GET_C())
+        for (char c = GET_C(); c != '*' && NEXT_C() != '/'; c = GET_C())
+                if (c == '\t') {
+                        warn_tab_char();
+                        src_i++;
+                        src_column += TAB_WIDTH;
+                }
+                else
+                        INCPOS();
                 
 }
 
@@ -581,6 +588,36 @@ static void lex_next(struct Tk *p_tk)
                                 p_tk->type = OP_GREATER;
                         }
                 }
+                break;
+        case '[':
+                INCPOS();
+                p_tk->type_group = G_MISC;
+                p_tk->type = BRACKET_L;
+                break;
+        case ']':
+                INCPOS();
+                p_tk->type_group = G_MISC;
+                p_tk->type = BRACKET_R;
+                break;
+        case '{':
+                INCPOS();
+                p_tk->type_group = G_MISC;
+                p_tk->type = BRACE_L;
+                break;
+        case '}':
+                INCPOS();
+                p_tk->type_group = G_MISC;
+                p_tk->type = BRACE_R;
+                break;
+        case '(':
+                INCPOS();
+                p_tk->type_group = G_MISC;
+                p_tk->type = PAREN_L;
+                break;
+        case ')':
+                INCPOS();
+                p_tk->type_group = G_MISC;
+                p_tk->type = PAREN_R;
                 break;
         case '?':
                 INCPOS();
