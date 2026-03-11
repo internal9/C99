@@ -276,8 +276,10 @@ static void lex_char(struct Tk *p_tk)
                 p_tk->value.c = (char) esc_char;
                         
         }
+        else if (c == '\t')
+                handle_tab_char();
         else if (!isalnum(c) && !isspace(c) && !ispunct(c) && c != '_')
-                LEX_ERR("Non-ASCII characters are unsupported.");
+                LEX_ERR("Invalid character literal.");
         INCPOS();
         c = GET_C();
         if (c != '\'')
@@ -324,20 +326,18 @@ static void lex_str(struct Tk *p_tk)
                         int esc_char = esc_seq_from_char(c);
                         if (esc_char == -1)
                                 LEX_ERR("Invalid escape sequence");
-                        p_tk->value.txt[i] = (char) esc_char;
+                        c = (char) esc_char;
                         INCPOS();
                 }
-                // prob needs rework idk for other special chars
-                else if (c == '\t') {
-                        p_tk->value.c = c;
+                else if (c == '\t')
                         handle_tab_char();
-                }
+                // prob needs rework idk for other special chars
                 else {
                         if (!isalnum(c) && !isspace(c) && !ispunct(c))
                                 LEX_ERR("Invalid character in string literal");
-                        p_tk->value.txt[i] = c;
                         INCPOS();
                 }
+                p_tk->value.txt[i] = c;
         }
         // char after ending '"'
         INCPOS();
