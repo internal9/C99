@@ -325,14 +325,19 @@ static void lex_str(struct Tk *p_tk)
                         if (esc_char == -1)
                                 LEX_ERR("Invalid escape sequence");
                         p_tk->value.txt[i] = (char) esc_char;
+                        INCPOS();
                 }
                 // prob needs rework idk for other special chars
+                else if (c == '\t') {
+                        p_tk->value.c = c;
+                        handle_tab_char();
+                }
                 else {
                         if (!isalnum(c) && !isspace(c) && !ispunct(c))
                                 LEX_ERR("Invalid character in string literal");
                         p_tk->value.txt[i] = c;
+                        INCPOS();
                 }
-                INCPOS();
         }
         // char after ending '"'
         INCPOS();
