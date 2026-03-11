@@ -326,8 +326,6 @@ static void lex_str(struct Tk *p_tk)
                                 LEX_ERR("Invalid escape sequence");
                         p_tk->value.txt[i] = (char) esc_char;
                 }
-                else if (c == '\t')
-                        handle_tab_char();
                 // prob needs rework idk for other special chars
                 else {
                         if (!isalnum(c) && !isspace(c) && !ispunct(c))
