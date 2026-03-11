@@ -421,45 +421,6 @@ static inline void init_keywords_map(void)
                                 (int) KW_BOOL + i);
 }
 
-// should probably rework this to buffer instead of copying into a file
-static void init_src_txt(const char *file_name)
-{
-        FILE *src_file;
-        if ((src_file = fopen(file_name, "r")) == NULL)
-                PERREXIT("Failed to open source file");
-
-        // fseek & ftell for portability to windows too ig???
-        if (fseek(src_file, 0, SEEK_END) != 0)
-                goto read_err;
-        if ((src_len = ftell(src_file)) == -1L)
-                goto read_err;
-        if (fseek(src_file, 0, SEEK_SET) != 0)  // heard setting it to start is safe, i'm paranoid tho
-                goto read_err;
-        // I would use a VLA but I can't gracefully handle those errors if a stack overflow happens
-        if ((src_txt = malloc((size_t) (src_len + 1))) == NULL)
-                goto read_err;
-        fread(src_txt, 1, (size_t) src_len, src_file);
-        if (ferror(src_file))
-                goto read_err;
-
-        goto read_success;
-
-read_err:
-        free(src_txt);
-        perror("Failed to read source file");
-        if (fclose(src_file) != 0)
-                PERREXIT("Failed to close source file");
-        
-read_success:
-        if (fclose(src_file) != 0) {
-                free(src_txt);
-                PERREXIT("Failed to close source file");
-        }
-        src_txt[src_len] = '\0';
-        // debug
-        printf("Source file size: %ld\n", src_len);
-}
-
 // TODO: deal with 'src_i' & 'column'
 // IDK: find a way to clean up repititve code
 void lex_next(struct Tk *p_tk)
@@ -681,8 +642,44 @@ void lex_next(struct Tk *p_tk)
         }
 }
 
+// should probably rework this to buffer instead of copying into a file
 void lex_init(const char *file_name)
 {
-        init_src_txt(file_name);
+        FILE *src_file;
+        if ((src_file = fopen(file_name, "r")) == NULL)
+                PERREXIT("Failed to open source file");
+
+        // fseek & ftell for portability to windows too ig???
+        if (fseek(src_file, 0, SEEK_END) != 0)
+                goto read_err;
+        if ((src_len = ftell(src_file)) == -1L)
+                goto read_err;
+        if (fseek(src_file, 0, SEEK_SET) != 0)  // heard setting it to start is safe, i'm paranoid tho
+                goto read_err;
+        // I would use a VLA but I can't gracefully handle those errors if a stack overflow happens
+        if ((src_txt = malloc((size_t) (src_len + 1))) == NULL)
+                goto read_err;
+        fread(src_txt, 1, (size_t) src_len, src_file);
+        if (ferror(src_file))
+                goto read_err;
+
+        goto read_success;
+
+read_err:
+        free(src_txt);
+        perror("Failed to read source file");
+        if (fclose(src_file) != 0)
+                PERREXIT("Failed to close source file");
+        
+read_success:
+        if (fclose(src_file) != 0) {
+                free(src_txt);
+                PERREXIT("Failed to close source file");
+        }
+        src_txt[src_len] = '\0';
+        // debug
+        printf("Source file size: %ld\n", src_len);
+        // debug end
+
         init_keywords_map();
 }
