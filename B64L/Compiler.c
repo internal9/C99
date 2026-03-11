@@ -209,31 +209,36 @@ static void lex_bin_int(struct Tk *p_tk)
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
         p_tk->value.int_v = 0;
-        char c = GET_C();
+        char c = GET_C();;
         // never write this again please
         for (int i = 0; i < 64; i++, (INCPOS(), c = GET_C())) {
-                if (c != '0' && c != '1') {
-                        if (isdigit(c))
-                                LEX_ERR_FMT("Expected binary digits after binary"
-                                        " integer literal prefix '0b',"
-                                        " instead got decimal digit '%c'", c);
-                        if (isxdigit(c))
-                                LEX_ERR_FMT("Expected binary digits after binary"
-                                        " integer literal prefix '0b',"
-                                        " instead got hexadecimal digit '%c'", c);
-                        return;
+                if (c == '0' || c == '1') {
+                        p_tk->value.int_v <<= 1 | (c - '0');
+                        continue;
                 }
-                p_tk->value.int_v <<= 1 | (c - '0');
+
+                if (isdigit(c))
+                        LEX_ERR_FMT("Expected binary digits after binary"
+                                    " integer literal prefix '0b',"
+                                    " instead got decimal digit '%c'", c);
+                else if (isxdigit(c))
+                        LEX_ERR_FMT("Expected binary digits after binary"
+                                    " integer literal prefix '0b',"
+                                    " instead got hexadecimal digit '%c'", c);
+                // non-digit character case
+                break;
         }
 
-        INCPOS();
-        c = GET_C();
+        printf("%ld %c\n", src_column, c);
         if (c == '0' || c == '1')
                 LEX_ERR("Binary integer literal exceeds 64 digits, above 64-bit range");
         if (isdigit(c))
-                LEX_ERR("Expected binary digits after binary integer literal prefix"
-                        "AND Binary integer literal exceeds 64 digits, "
-                        "above 64-bit range");
+                LEX_ERR_FMT("Binary integer literal exceeds 64 digits,"
+                        " above 64-bit range AND got decimal digit '%c'", c);
+        else if (isxdigit(c))
+                LEX_ERR_FMT("Binary integer literal exceeds 64 digits,"
+                            " above 64-bit range AND got hexadecimal"
+                            " digit '%c'", c);
 }
 
 static void lex_hex_int(struct Tk *p_tk)
