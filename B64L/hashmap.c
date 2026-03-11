@@ -125,14 +125,14 @@ bool hashmap_put_int(struct HashMap *p_hashmap, const char *key, size_t key_len,
         return true;
 }
 
-inline void *hashmap_get_ptr(struct HashMap *p_hashmap, const char *key, size_t key_len)
+void *hashmap_get_ptr(struct HashMap *p_hashmap, const char *key, size_t key_len)
 {
 	struct Bucket *p_bucket = find_bucket(p_hashmap, key, key_len);
         return p_bucket != NULL ? p_bucket->value.ptr_v : NULL;
 }
 
 // returns '-1' if key not found
-inline int hashmap_get_int(struct HashMap *p_hashmap, const char *key, size_t key_len)
+int hashmap_get_int(struct HashMap *p_hashmap, const char *key, size_t key_len)
 {
         struct Bucket *p_bucket = find_bucket(p_hashmap, key, key_len);
         return p_bucket != NULL ? p_bucket->value.int_v  : -1;
@@ -159,7 +159,8 @@ bool hashmap_init(struct HashMap *p_hashmap, size_t init_size)
 	return p_hashmap->buckets != NULL;
 }
 
-inline void hashmap_free(struct HashMap *p_hashmap)
+// Bruh
+void hashmap_free(struct HashMap *p_hashmap)
 {
         free(p_hashmap->buckets);
 }
