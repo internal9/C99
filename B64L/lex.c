@@ -1,4 +1,5 @@
 /* NOTES
+   - finish 'type_str'
    - handle hashmaping freeing after lex_err
    - use a global ptr for char instead of 10 billion char variables?
    - probably error handle malloc
