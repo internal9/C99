@@ -109,7 +109,6 @@ struct Tk {
                 char c;                // Used by 'LIT_CHAR'
         } value;
         const char *type_str;
-        long len;
         long line;      // ftell is archaic and returns a 'long', thus 'len' *also* has to be a 'long'
         long column;
         enum TkTypeGroup type_group;
