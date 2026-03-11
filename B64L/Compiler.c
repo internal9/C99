@@ -2,7 +2,7 @@
    - handle hashmaping freeing after lex_err
    - use a global ptr for char instead of 10 billion char variables?
    - probably error handle malloc
-   - for 'lex_literal_str' handle *THE SOURCE's* line feeds (not the chars) for multiline strings
+   - for 'lex_str' handle *THE SOURCE's* line feeds (not the chars) for multiline strings
    - LOLL do i *even* need malloc for tk 'txt' member? sure i might have to write a function to read escape sequences for strings, not even that bad bruh!!!
    - Some time later, format escape sequences, which *might* require *txt* union member of 'struct Tk' to be changed to a char value since the src_txt escape sequences are unforatted and just chars, bla bla bla
    
@@ -173,28 +173,67 @@ static struct HashMap keywords_hashmap;
 #define NEXT_C() src_txt[src_i + 1]
 #define PREV_C() src_txt[src_i - 1]
 
+static inline void handle_tab_char(void)
+{
+        WARN_FMT("Tab character '\\t' width assumed to be %d spaces despite ambigious "
+                 "width and interpration, may lead to inaccurate lexing column numbers",
+                 TAB_WIDTH);
+        src_i++;
+        src_column += TAB_WIDTH;
+}
+
+static inline void handle_newline_char(void)
+{
+        src_i++;
+        src_line++;
+        src_column = 0;
+}
+
+// IF invalid char for escape sequence, -1 is returned
+static inline int esc_seq_from_char(char c)
+{
+        switch (c) {
+        case '0': return '\0';
+        case 'n': return '\n';
+        case 't': return '\t';
+        case '\\': return '\\';
+        case '\'': return '\'';
+        case '"': return '"';
+        default: return -1;
+        }
+}
+
 // support octal integers?
 static void lex_bin_int(struct Tk *p_tk)
 {
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
         p_tk->value.int_v = 0;
-        char c = GET_C();	
-        if (c != '0' || c != '1')
-                LEX_ERR("Expected binary digits after binary integer literal prefix '0b'.");
-
-        for (int i = 0; i < 64; i++) {
-                INCPOS();
-                c = GET_C();
-                if (c != '0' || c != '1')
+        char c = GET_C();
+        // never write this again please
+        for (int i = 0; i < 64; i++, (INCPOS(), c = GET_C())) {
+                if (c != '0' && c != '1') {
+                        if (isdigit(c))
+                                LEX_ERR_FMT("Expected binary digits after binary"
+                                        " integer literal prefix '0b',"
+                                        " instead got decimal digit '%c'", c);
+                        if (isxdigit(c))
+                                LEX_ERR_FMT("Expected binary digits after binary"
+                                        " integer literal prefix '0b',"
+                                        " instead got hexadecimal digit '%c'", c);
                         return;
-
+                }
                 p_tk->value.int_v <<= 1 | (c - '0');
         }
+
         INCPOS();
         c = GET_C();
         if (c == '0' || c == '1')
                 LEX_ERR("Binary integer literal exceeds 64 digits, above 64-bit range");
+        if (isdigit(c))
+                LEX_ERR("Expected binary digits after binary integer literal prefix"
+                        "AND Binary integer literal exceeds 64 digits, "
+                        "above 64-bit range");
 }
 
 static void lex_hex_int(struct Tk *p_tk)
@@ -202,12 +241,8 @@ static void lex_hex_int(struct Tk *p_tk)
         p_tk->type_group = G_LITERAL;
         p_tk->type = LIT_INT;
         p_tk->value.int_v = 0;
-        char c = GET_C();
-        if (!isdigit(c))
-                LEX_ERR("Expected digits after hexadecimal integer literal prefix.");
-
+        char c;
         for (int i = 0; i < 8; i++) {
-                INCPOS();
                 switch (c = GET_C()) {
                 case 'a': case 'A': p_tk->value.int_v <<= 4 | 10; break;
                 case 'b': case 'B': p_tk->value.int_v <<= 4 | 11; break;
@@ -220,8 +255,8 @@ static void lex_hex_int(struct Tk *p_tk)
                                 return;
                         p_tk->value.int_v <<= 4 | (c - '0');
                 }
+                INCPOS();
         }
-        INCPOS();
         if (isxdigit(GET_C()))
                 LEX_ERR("Hexadecimal integer literal exceeds 8 digits, above 64-bit range");
 }
@@ -240,16 +275,16 @@ static void lex_num(struct Tk *p_tk)
         errno = 0;
         char *num_src_txt_end;
         p_tk->value.fp_v = strtod(src_txt + src_i, &num_src_txt_end);
-        bool non_fractional = strchr(src_txt + src_i, '.') == NULL;
+        bool no_decimal = strchr(src_txt + src_i, '.') == NULL;
         // point to *last digit* instead incase of overflow debugging error messages
         SET_POS((num_src_txt_end - src_txt) - 1);
 
-        // assume a very large 'int' was attempted to be lexed
-        if (non_fractional) {
-                if (*num_src_txt_end != 'f')
+        if (*num_src_txt_end != 'f') {
+                // assume a very large 'int' was attempted to be lexed
+                if (no_decimal)
                         LEX_ERR("64-bit integer literal overflow");
+        } else
                 INCPOS();
-        }
         if (errno == ERANGE)
                 LEX_ERR("floating-point number overflow");
         INCPOS();
@@ -266,10 +301,8 @@ static void lex_dec_int_or_num(struct Tk *p_tk)
                 c = GET_C();
                 if (c == '.' || c == 'f')
                         goto try_lex_num;
-                if (!isdigit(c)) {
-                        printf("int value: %ld\n", p_tk->value.int_v);
+                if (!isdigit(c))
                         return;
-                }
                 if (p_tk->value.int_v > INT64_MAX / 10) { printf("asd\n");
                         goto try_lex_num;}
                 // C standard guarantees decimal digits are in order
@@ -332,39 +365,37 @@ static void lex_keyword_or_identifier(struct Tk *p_tk)
 
 
 // Only *ascii* chars will be supported, may be changed to *utf-8*, and allow wide chars
-static void lex_literal_char(struct Tk *p_tk)
+static void lex_char(struct Tk *p_tk)
 {
+        p_tk->type_group = G_LITERAL;
+        p_tk->type = LIT_CHAR;
+
         char c = GET_C();
         if (c == '\'')
                 LEX_ERR("Character literal cannot be empty");
-        if (!isalnum(c) && !isspace(c) && !ispunct(c) && c != '_')
+        if (c == '\\') {
+                INCPOS();
+                c = GET_C();
+                int esc_char = esc_seq_from_char(c);
+                if (esc_char == -1)
+                        LEX_ERR("Invalid escape sequence");
+                p_tk->value.c = (char) esc_char;
+                        
+        }
+        else if (!isalnum(c) && !isspace(c) && !ispunct(c) && c != '_')
                 LEX_ERR("Non-ASCII characters are unsupported.");
         INCPOS();
-        if (GET_C() != '\'')
+        c = GET_C();
+        if (c != '\'')
                 LEX_ERR("Expected ''' to end character literal.");
         INCPOS();
-        p_tk->type_group = G_LITERAL;
-        p_tk->type = LIT_CHAR;
-        p_tk->value.c = c;
 }
-
-// IF invalid char for escape sequence, '0' is returned
-static inline char esc_seq_from_char(char c)
-{
-        switch (c) {
-        case 'n': return '\n';
-        case 't': return '\t';
-        case '\\': return '\\';
-        case '\'': return '\'';
-        case '"': return '"';
-        default: return 0;
-        }
-}
-
 
 // so efficient!
-static void lex_literal_str(struct Tk *p_tk)
+static void lex_str(struct Tk *p_tk)
 {
+        p_tk->type_group = G_LITERAL;
+        p_tk->type = LIT_STR;
         long src_i_start = src_i;
         long escape_seq_count = 0;
         char c;
@@ -373,7 +404,7 @@ static void lex_literal_str(struct Tk *p_tk)
                 if (c == '\0' || c == '\n') {
                         // read at last char of string
                         DECPOS();
-                        LEX_ERR("Unfinished string literal.");
+                        LEX_ERR("Unclosed string literal.");
                 }
                 else if (c == '\\') {
                         c = NEXT_C();
@@ -396,11 +427,13 @@ static void lex_literal_str(struct Tk *p_tk)
                 if ((c = GET_C()) == '\\') {
                         INCPOS();
                         c = GET_C();
-                        char esc_char = esc_seq_from_char(c);
-                        if (esc_char == 0)
+                        int esc_char = esc_seq_from_char(c);
+                        if (esc_char == -1)
                                 LEX_ERR("Invalid escape sequence");
-                        p_tk->value.txt[i] = esc_char;
+                        p_tk->value.txt[i] = (char) esc_char;
                 }
+                else if (c == '\t')
+                        handle_tab_char();
                 // prob needs rework idk for other special chars
                 else {
                         if (!isalnum(c) && !isspace(c) && !ispunct(c))
@@ -409,67 +442,79 @@ static void lex_literal_str(struct Tk *p_tk)
                 }
                 INCPOS();
         }
-}
-
-static inline void warn_tab_char(void)
-{
-        WARN_FMT("Tab character '\\t' width assumed to be %d spaces despite ambigious "
-                 "width and interpration, may lead to inaccurate lexing column numbers",
-                 TAB_WIDTH);
+        // char after ending '"'
+        INCPOS();
 }
 
 // whitespace characters are non-printable characters that define text layouts
-static void handle_whitespace(void)
+static bool handle_whitespace(void)
 {
-        char c;
+        char c = GET_C();
+        if (!isspace(c)) return false;
         while (isspace(c = GET_C()))
-                if (c == '\t') {
-                        warn_tab_char();
-                        src_i++;
-                        src_column += TAB_WIDTH;
-                } else if (c == '\n') {
-                        src_line++;
-                        src_i++;
-                        src_column = 0;
-                } else
-                        INCPOS();
-}
-
-static void handle_line_comment(void)
-{
-        for (char c = GET_C(); c != '\n' || c != '\0'; c = GET_C())
-                if (c == '\t') {
-                        warn_tab_char();
-                        src_i++;
-                        src_column += TAB_WIDTH;
-                }
+                if (c == '\t')
+                        handle_tab_char();
+                else if (c == '\n')
+                        handle_newline_char();
                 else
                         INCPOS();
+        return true;
 }
 
-static void handle_multi_line_comment(void)
+static bool handle_line_comment(void)
 {
-        for (char c = GET_C(); c != '*' && NEXT_C() != '/'; c = GET_C())
-                if (c == '\t') {
-                        warn_tab_char();
-                        src_i++;
-                        src_column += TAB_WIDTH;
-                }
+        char c = GET_C();
+        if (c != '/' || NEXT_C() != '/') return false;
+        INCPOS();
+        for (c = GET_C(); c != '\n' && c != '\0'; c = GET_C())
+                if (c == '\t')
+                        handle_tab_char();
                 else
                         INCPOS();
-                
+        return true;
+}
+
+static bool handle_multiline_comment(void)
+{
+        char c = GET_C();
+        if (c != '/' || NEXT_C() != '*') return false;
+        long comment_src_line = src_line;
+        long comment_src_column = src_column;
+        INCPOS();
+        for (c = GET_C(); c != '*' || NEXT_C() != '/'; c = GET_C())
+                if (c == '\0')
+                        LEX_ERR_FMT("Unclosed multiline comment "
+                                    "starting at (L%ld C%ld)",
+                                    comment_src_line,comment_src_column);
+                else if (c == '\t')
+                        handle_tab_char();
+                else if (c == '\n')
+                        handle_newline_char();
+                else
+                        INCPOS();
+
+        // char after ending '*/'
+        INCPOS();
+        INCPOS();
+        return true;
+}
+
+// probably the worst thing written on here
+static inline void handle_non_lexable(void)
+{
+        while (handle_whitespace() || handle_line_comment() ||
+               handle_multiline_comment());
 }
 
 // TODO: deal with 'src_i' & 'column'
 // IDK: find a way to clean up repititve code
 static void lex_next(struct Tk *p_tk)
 {
-        handle_whitespace();
+        handle_non_lexable();
         char c = GET_C();
-        // next char after 'c'
         p_tk->line = src_line;
         p_tk->column = src_column;
-        
+
         switch (c) {
         case '=':
                 INCPOS();
@@ -504,12 +549,7 @@ static void lex_next(struct Tk *p_tk)
                 break;
         case '/':
                 INCPOS();
-                if (GET_C() == '/')
-                        handle_line_comment();
-                else if (GET_C() == '*')
-                        handle_multi_line_comment();
-                else
-                        lex_op_other_or_assign(p_tk, G_OP_ARITH, OP_DIV, OP_DIV_AS);
+                lex_op_other_or_assign(p_tk, G_OP_ARITH, OP_DIV, OP_DIV_AS);
                 break;
         case '*':
                 INCPOS();
@@ -631,27 +671,32 @@ static void lex_next(struct Tk *p_tk)
                 break;
         case '\'':        // 'LIT_CHAR'
                 INCPOS();
-                lex_literal_char(p_tk);
+                lex_char(p_tk);
                 break;
         case '"':        // 'LIT_STR'
                 INCPOS();
-                lex_literal_str(p_tk);
+                lex_str(p_tk);
                 break;
         case '0':
-                if (GET_C() == 'x') {
+                INCPOS();
+                c = GET_C();
+                if (c == 'x') {
                         INCPOS();
                         lex_hex_int(p_tk);
-                } else if (GET_C() == 'b') {
+                } else if (c == 'b') {
                         INCPOS();
                         lex_bin_int(p_tk);
-                } else
+                } else {
+                        DECPOS();
                         lex_dec_int_or_num(p_tk);
+                }
                 break;
         case '.':
                 // no incpos, 'lex_num' needs to read '.' for fraction
                 if (isdigit(NEXT_C()))
                         lex_num(p_tk);
-               else {
+                else {
+                        INCPOS();
                         p_tk->type_group = G_MISC;
                         p_tk->type = PERIOD;
                 }
@@ -676,7 +721,7 @@ static void lex_next(struct Tk *p_tk)
                         if (isprint(c))
                                 LEX_ERR_FMT("Invalid symbol '%c', character code of %d", c, (int) c);
                         else
-                                printf("raa: %ld %ld || ", src_i, src_len), LEX_ERR_FMT("Invalid non-printable symbol, character code of %d", (int) c);
+                                LEX_ERR_FMT("Invalid non-printable symbol, character code of %d", (int) c);
         }
 }
 
@@ -689,6 +734,7 @@ static void gen_bytecode_file(void)
 
         // debug
         printf("TOKEN TYPE: %d\n", tk.type);
+        printf("%c\n", GET_C());
 }
 
 // should probably rework this to buffer instead of copying into a file
