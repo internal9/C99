@@ -1,5 +1,10 @@
 /*
 	*NOTES*
+        *Need better way to handle error msgs for each opcode*
+        *Endian independent* way of writing / reading bits for integers
+        *Negative ints/numbers representation *are not* automatically handled due to raw interpretation of bits
+        Use 'src_len' instead of 'file_size' to reduce confusion?
+        Better handling of number over & under flows
 	Make incrementing ip after running instruction as easy as possible
 	Line debugging
 	make expect byte auto increment instruction pointer?
@@ -29,6 +34,7 @@
 #define MAX(x, y) (((x) >= (y)) ? (x) : (y))
 #define STACK_SIZE 512	// i sure do love arbitrary numbers, will change later
 
+// Move into header
 // Explicit values just to make stuff easier (yeah i gonna fix this later)
 enum OPCODE
 {
@@ -131,9 +137,10 @@ enum OPERAND_READ_MODE
 			They expect sizeof(int64_t) or sizeof(double) amount of bits
 			*depending* on instruction
 	*/
-	FULL = 1,
+	EIGHT = 1,
 	HALF = 2,
-	EIGHT = 3
+	FULL = 3,
+
 };
 
 enum REG
@@ -166,14 +173,14 @@ double fp_regs[] = {
 	[FR1] = 0,
 	[FR2] = 0,
 };
-
+// might remove these 2 lookup tables
 const int I_LITERAL_SIZES[] = {
 	[FULL] = 8,
 	[HALF] = 4,
 	[EIGHT] = 1,
 };
 
-// C Standard: floating-point size varies
+
 const int FP_LITERAL_SIZES[] = {
 	[FULL] = sizeof(double),
 	[HALF] = MAX(sizeof(double) / 2, 1),
@@ -189,6 +196,28 @@ static uint8_t *p_bytecode;
 // Util
 #define FP_TO_I64_MAX ((double) (INT64_MAX - 100000))	// random arbitrary value cuz floating-point conversion errors are scary!!!
 #define FP_TO_I64_MIN ((double) (INT64_MIN + 100000))
+
+// 'FULL, HALF, EIGHT'
+static inline int read_mode_to_int_size(enum OPERAND_READ_MODE read_mode)
+{
+        switch (read_mode) {
+        case FULL: return 8;
+        case HALF: return 4;
+        case EIGHT: return 1;
+        default: return -1;
+        }
+}
+
+// C Standard: floating-point size varies
+static inline int read_mode_to_fp_size(enum OPERAND_READ_MODE read_mode)
+{
+        switch (read_mode) {
+        case FULL: return sizeof(double);
+        case HALF: return MAX(sizeof(double) / 2, 1);
+        case EIGHT: return MAX(sizeof(double) / 8, 1);
+        default: return -1;
+        }
+}
 
 static inline int64_t try_cast_fp_to_i64(double fp_val)
 {
@@ -210,15 +239,13 @@ static inline uint8_t expect_byte(unsigned long p_bytes_index, const char *err_m
 // 'err_msg' is expected to have two 'unsigned long' formats for count & insufficient bytes given (compared to expected)
 static inline uint8_t *expect_bytes(unsigned long p_bytes_index, unsigned long count, const char *err_msg)	// mainly just checks if specified amount of bytes exist, not literally allocate, idk
 {
-	if (count < 2)
-		ERREXIT("expect_bytes: Expected 'count' >= 2");
-
-	if (p_bytes_index > file_size)
-	   	ERREXIT(err_msg, count, 0);	// 0 bytes given
-
-	unsigned long byte_count_end = p_bytes_index + (count - 1);
-	if (byte_count_end >= file_size)
-		ERREXIT(err_msg, count, file_size - p_bytes_index);	// 3rd arg for insufficient byte count that 'err_msg' must log, e.g. "only got X bytes"
+        //        printf("ok; %lu %lu\n", file_size, p_bytes_index + count - 1);
+        // temp
+        if (count < 1)
+                ERREXIT("expect_bytes: requires 'count' > 0");
+        // temp end
+        if (file_size <= p_bytes_index + count - 1)
+                ERREXIT(err_msg, count, file_size - p_bytes_index);	// 3rd arg for insufficient byte count that 'err_msg' must log, e.g. "only got X bytes"
 	return p_bytecode + p_bytes_index;
 }
 
@@ -226,6 +253,10 @@ static inline uint8_t *expect_bytes(unsigned long p_bytes_index, unsigned long c
 static inline void expect_bytes_memcpy(void *dest, unsigned long p_bytes_index, unsigned long count, const char *err_msg)
 {
 	uint8_t *src_literal_bytes = expect_bytes(p_bytes_index, count, err_msg);
+        /*        printf("debug start\n");
+        for (int n = 0; n < count; n++)
+                printf("%u\n", src_literal_bytes[n]);
+                printf("debug end\n"); */
 	memcpy(dest, src_literal_bytes, (size_t) count);
 }
 
@@ -249,10 +280,30 @@ static void stack_push(uint8_t byte)
 static void stack_pushn(uint8_t *p_bytes, int count)
 {
 	if (i_regs[RSP] == STACK_SIZE - count)
-		ERREXIT("VM stack overflow\n");
+		ERREXIT("VM stack overflow");
 
 	memcpy((stack + i_regs[RSP]) + 1, p_bytes, (size_t) count);
 	i_regs[RSP] += count;
+}
+
+/*static uint8_t stack_pop(void)
+{
+        if (i_regs[RSP] == -1)
+                ERREXIT("VM stack underflow");
+        return stack[i_regs[RSP]--];
+}*/
+
+static uint8_t* stack_popn(int count)
+{
+        if (i_regs[RSP] - count < 0)
+                ERREXIT("VM stack underflow");
+        i_regs[RSP] -= count;
+        return stack + i_regs[RSP];
+}
+
+static inline uint8_t stack_pop(void)
+{
+        return *stack_popn(1);
 }
 
 /*
@@ -280,6 +331,20 @@ static int read_stack_addr(uint8_t info_byte)
 	{
 		expect_bytes_memcpy(&base, ip, (unsigned long) I_LITERAL_SIZES[base_read_mode],
 			"Stack address: expected %lu bytes for base value literal, instead got %lu bytes");
+	}
+
+        if (index_read_mode == USE_REG)
+	{
+		enum REG base_reg = expect_reg(ip, "Expected byte containing valid reg for reading displacement of stack address");
+		if (!IS_I_REG(base_reg))
+			ERREXIT("Stack address: expected integer reg (i reg) for displacement value");
+
+		base = i_regs[base_reg];
+	}
+	else		   // Size specification for literal operand
+	{
+		expect_bytes_memcpy(&base, ip, (unsigned long) I_LITERAL_SIZES[base_read_mode],
+			"Stack address: expected %lu bytes for displacement value literal, instead got %lu bytes");
 	}
 
 	if (scale_read_mode == USE_REG)
@@ -373,6 +438,7 @@ get_stack_addr_part_size(enum)
 }
 */
 
+// stack <- int
 static void op_movsi(enum OPERAND_READ_MODE operand_2_read_mode)
 {
 	uint8_t stack_addr_info = expect_byte(ip + 1, "movsi: expected info byte for reading stack address");
@@ -415,6 +481,79 @@ static void op_movsf(enum OPERAND_READ_MODE operand_2_read_mode)
 	}
 }
 
+static void op_push();
+static void op_pop(enum OPERAND_READ_MODE operand_read_mode)
+{
+        
+}
+
+// branching operations
+// *All* jmp operations use *relative* offsets
+static void jmp(long amount)
+{
+
+}
+static void op_jmp(enum OPERAND_READ_MODE operand_read_mode)
+{
+        // prob inc move to 'run_bytecode'?
+        // ip++;
+        long jmp_amount;
+        int operand_size;
+        if (operand_read_mode == USE_REG) {
+                operand_size = 1;
+                enum REG src_reg = expect_reg(ip + 1,
+                                              "jmp: Expected byte containing valid"
+                                              " i64 reg for amount to 'jmp'");
+                if (!IS_I_REG(src_reg))
+                        ERREXIT("jmp: expected i64 reg");
+                // add '1' to include arg byte, also *assuming* 'jmp_amount' >= 1
+                jmp_amount = i_regs[src_reg];
+        }
+        // HALF, FULL, or EIGHT
+        else {
+                operand_size =  read_mode_to_int_size(operand_read_mode),
+                /* initialize, so no bytes with *garbage values* as
+                   'count' can be less than sizeof(long) */
+                jmp_amount = 0;
+                expect_bytes_memcpy(&jmp_amount, ip + 1,
+                                    operand_size,
+                                    "jmp: Expected %lu byte(s) for jmp amount,"
+                                    " instead got %lu byte(s)");
+
+                printf("JMP AMOUNT BYTES: %.8x\n", jmp_amount);
+
+        }
+        
+        // implement overflow handling
+        if (jmp_amount == 0)
+                ERREXIT("jmp: amount cannot == 0");
+        // moving forwards? add 'operand_size' to account for operand byte(s)
+        if (jmp_amount >= 1)
+                jmp_amount += operand_size;
+        else
+                // detect underflow
+        ip += jmp_amount;
+        if (ip >= file_size)
+                ERREXIT("jmp: amount goes beyond last instr");
+}
+
+static void op_call(enum OPERAND_READ_MODE operand_read_mode)
+{
+        int arg_size = read_mode_to_int_size(operand_read_mode);
+        // after instr & arg bytes
+        unsigned long ret_addr = ip + (unsigned long) arg_size;
+        stack_pushn((uint8_t *) &ret_addr, arg_size);
+        op_jmp(operand_read_mode);
+}
+
+static void op_ret(enum OPERAND_READ_MODE operand_read_mode)
+{
+        int arg_size = read_mode_to_int_size(operand_read_mode);
+        memcpy(&ip, stack_popn(arg_size), arg_size);
+        if (ip >= file_size)
+                ERREXIT("ret: addr goes beyond last instr");
+}
+
 static inline void op_printreg(void)	// wow
 {
 	enum REG src_reg = expect_byte(ip + 1, "printreg: expected byte for src reg");
@@ -427,15 +566,21 @@ static void run_bytecode(void)
 	printf("INSTR POINTER: %lu\nFILE SIZE: %lu\n", ip, file_size);
 	while (ip != file_size)	// accomodate if ip points one past 'p_bytes'
 	{
+                printf("where: %lu size: %lu\n", ip, file_size);
+
+                // swap 'opcode' & 'operand_read_mode' positions in binary encoding?
 		uint8_t byte = p_bytecode[ip];
 		int opcode = byte & 0x3F;	// 0x3F = 0b00111111
 		enum OPERAND_READ_MODE operand_read_mode = (byte & 0xC0) >> 6;	// 0xC0 = 0b11000000, shift 6 to extract value without impact from trailing zeros
-		printf("HEX BYTE: %.2X\nOPCODE: %.2X\n", byte, opcode);
-	
+		printf("HEX BYTE: %.2X\nOPCODE: %.2X\nOPCODE (DEC) %d\n", byte, opcode, opcode);
+                printf("%d\n", operand_read_mode);
+
 		switch (opcode)
 		{
-			case MOVR: printf("THE BYTE %d\n", operand_read_mode); op_movr(operand_read_mode); break;
-			case PRINTREG: op_printreg(); break;
+                case MOVR: printf("THE BYTE %d\n", operand_read_mode); op_movr(operand_read_mode); break;
+                case PRINTREG: op_printreg(); break;
+
+                case JMP: op_jmp(operand_read_mode); break;
 		}
 	}
 }
