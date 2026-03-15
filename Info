@@ -1,6 +1,6 @@
 GCC Bash Alias: alias gcc="gcc -std=c99 -O0 -pedantic -Wall -Wextra -Wfloat-equal -Wimplicit-int -Wundef -Wshadow -Wpointer-arith -Wcast-align -Wstrict-prototypes -Wstrict-overflow=4 -Wwrite-strings -Waggregate-return -Wcast-qual -Wswitch-default -Wswitch-enum -Wconversion -Wunreachable-code -Wformat -Wsequence-point -fno-diagnostics-color" # fno disagnostics removes coloring
 
-Another alias (unsure about this one): alias gcc='gcc -std=c99 -pedantic -O0 -Wall -Wformat=2 -Wconversion -Wimplicit-fallthrough \                                                                                 
+Another alias (unsure about this one): alias gcc='gcc -std=c99 -pedantic -O2 -Wall -Wformat=2 -Wconversion -Wimplicit-fallthrough \                                                                                 
 -Werror=format-security \                                                                                                                                                    
 -Wfloat-equal -Wimplicit-int \                                                                                                                                               
 -Wundef -Wshadow -Wpointer-arith \                                                                                                                                           
