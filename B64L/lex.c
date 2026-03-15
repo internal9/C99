@@ -404,18 +404,6 @@ static inline void handle_non_lexable(void)
                handle_multiline_comment());
 }
 
-/* static void gen_bytecode_file(void)
-{
-        struct Tk tk;
-        memset(&tk, 0, sizeof(struct Tk));
-        lex_next(&tk);
-        
-
-        // debug
-        printf("TOKEN TYPE: %d\n", tk.type);
-        printf("%c\n", GET_C());
-} */
-
 static inline void init_keywords_map(void)
 {
         hashmap_init(&keywords_hashmap, HASHMAP_INIT_SIZE);
@@ -430,11 +418,12 @@ static inline void init_keywords_map(void)
 void lex_next(struct Tk *p_tk)
 {
         handle_non_lexable();
-        char c = GET_C();
+        memset(p_tk, 0, sizeof(struct Tk));
         p_tk->line = src_line;
         p_tk->column = src_column;
-
-        switch (c) {
+        
+        char c;
+        switch (c = GET_C()) {
         case '=':
                 INCPOS();
                 if (GET_C() == '=') {

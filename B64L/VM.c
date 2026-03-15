@@ -1,6 +1,6 @@
 /*
 	*NOTES*
-        *Need flexible way to manage op failure, Need better way to handle error msgs for each opcode*
+        *Need better way to handle error msgs for each opcode*
         *Endian independent* way of writing / reading bits for integers
         *Negative ints/numbers representation *are not* automatically handled due to raw interpretation of bits
         Use 'src_len' instead of 'file_size' to reduce confusion?
