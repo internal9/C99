@@ -30,7 +30,7 @@ int main(int argc, const char *argv[])
         // assume 'option -n'
         if (argc == 2) {
                 lex_init(file_name);
-                // vm_run(bytecode_gen_nofile());
+                bytecode_gen_nofile();
         }
         else if (argc == 3) {
                 const char *flag = argv[1];

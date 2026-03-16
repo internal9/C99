@@ -43,7 +43,11 @@ static char *src_txt;
 
 static const char* keywords[] = {
         "bool", "char", "int", "num",
-        "array", "string", "struct",
+        "string", "array", "struct",
+        "if", "elif", "else",
+        "while", "for",
+        "switch", "jmp",
+        "fn"
 };
 
 static struct HashMap keywords_hashmap;
@@ -415,7 +419,7 @@ static inline void init_keywords_map(void)
 
 // TODO: deal with 'src_i' & 'column'
 // IDK: find a way to clean up repititve code
-void lex_next(struct Tk *p_tk)
+enum TkType lex_next(struct Tk *p_tk)
 {
         handle_non_lexable();
         memset(p_tk, 0, sizeof(struct Tk));
@@ -617,7 +621,7 @@ void lex_next(struct Tk *p_tk)
                         LEX_ERR("Null terminator '\\0' should be at end of file");
                 p_tk->type_group = G_MISC;
                 p_tk->type = END;
-                // cleanup
+                // cleanup, since end of file
                 hashmap_free(&keywords_hashmap);
                 break;
         default:
@@ -633,6 +637,8 @@ void lex_next(struct Tk *p_tk)
                         else
                                 LEX_ERR_FMT("Invalid non-printable symbol, character code of %d", (int) c);
         }
+
+        return p_tk->type;
 }
 
 // should probably rework this to buffer instead of copying into a file

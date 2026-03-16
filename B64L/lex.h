@@ -1,5 +1,4 @@
 #include <stdint.h>
-#include <stdio.h>
 
 enum TkType {
         // assignment operators
@@ -54,14 +53,17 @@ enum TkType {
         KW_STRING,
         KW_ARRAY,
         KW_STRUCT,
-        KW_DYNAMIC,
-        KW_CONST,
+        //        KW_DYNAMIC,
+        //        KW_CONST,
         KW_IF,
         KW_ELIF,
         KW_ELSE,
         KW_WHILE,
-        KW_DO_WHILE,
-        KW_FUNC,
+        KW_FOR,
+        KW_SWITCH,
+        KW_JMP,
+        //        KW_DO_WHILE, // remove?
+        KW_FN,
 
         // literals
         LIT_BOOL,
@@ -69,6 +71,7 @@ enum TkType {
         LIT_INT,
         LIT_NUM,
         LIT_STR,
+        LIT_NIL,
 
         // misc
         /*
@@ -96,6 +99,7 @@ enum TkTypeGroup
         G_OP_LOGICAL,
         G_OP_BITWISE,
         G_KEYWORD,
+        //        G_DECL, declare
         G_LITERAL,
         G_MISC
 };
@@ -116,4 +120,4 @@ struct Tk {
 };
 
 void lex_init(const char* file_name);
-void lex_next(struct Tk *p_tk);
+enum TkType lex_next(struct Tk *p_tk); // Returns '1' if token type is *not* 'END'
