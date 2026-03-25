@@ -77,7 +77,7 @@ expr(struct Tk *p_tk)
         static int precs[] = {[OP_ADD] = 0, [OP_MUL] = 1};
         static struct Tk buf[512];
         static int i = 0;
-        static int R1_pushes = 0;
+        // static int R1_pushes = 0; needed?
         static bool R1_use = false;
 
         int s_i = i;
@@ -107,18 +107,19 @@ expr(struct Tk *p_tk)
                                 if (l->type == INT) {
                                         if (R1_use == true) {
                                                 emit1(PSH, R1);
-                                                R1_pushes++;
+                                                // R1_pushes++; // not needed?
                                         }
                                         emit2(MOV, R1, r->value.int_v);
                                 }
                                 else // R1
                                         if (R1_use != true) {
                                                 emit(POP, R1);
+                                                R1_use = true;
                                                 /* Assume another sub expr with higher
                                                    prec pushed this R1 to be used later */
-                                                R1_pushes--;
+                                                // R1_pushes--;
                                         }
-                                /* else assume reg R1 was last used *without* being pushed due sub-expr from *right* operand,
+                                /* else (R1_use == true) assume reg R1 was last used *without* being pushed due sub-expr from *right* operand,
                                    no need to emit any instrs, just operate on R1 */
                                 buf[last_op_i - 1] = R1; // use same 'last_op_i' replace compiled expr, other tks are now 'garbage'
                                 i = last_op_i;
