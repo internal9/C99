@@ -100,6 +100,7 @@ void *arena_realloc_top(struct Arena *p_arena, ptrdiff_t new_amount) {
     return p_arena->top_ptr;
 }
 
+/* didn't think this through, track first block size and actually reset the thing lol */
 void arena_reset(struct Arena *p_arena) {
     struct Block *p_block = p_arena->current_block;
     struct Block *p_prev_block = p_block->prev_block;
