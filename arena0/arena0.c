@@ -70,14 +70,15 @@ void *arena_realloc(struct Arena *p_arena, void *ptr, ptrdiff_t old_amount, ptrd
     ptrdiff_t offset;
     if (new_amount <= old_amount) return ptr;
     offset = (char*) ptr - (char*) p_arena->current_block->mem;
-    if (offset + new_amount > p_arena->current_block_size) {
+    /* unable to know next ptr, so yeah */
+    if (p_arena->top_ptr != ptr || offset + new_amount > p_arena->current_block_size) {
         /* Accept the block won't be fully used up */
         arena_add_block(p_arena, MAX(new_amount, p_arena->default_block_size));
         p_arena->current_block_used = new_amount;
         p_arena->top_ptr = memcpy(p_arena->current_block->mem, ptr, old_amount);
     }
     else
-        /* Grow in same block, as it's at top */
+        /* Grow in same block, as it's at top and doesnt exceed current block size */
         p_arena->current_block_used += new_amount - old_amount;
     return p_arena->top_ptr;
 }
