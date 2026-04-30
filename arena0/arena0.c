@@ -86,6 +86,7 @@ void *arena_realloc(struct Arena *p_arena, void *ptr, ptrdiff_t old_amount, ptrd
 void *arena_realloc_top(struct Arena *p_arena, ptrdiff_t new_amount) {
     ptrdiff_t offset, old_amount;
     assert(new_amount > 0);
+    assert(p_arena->top_ptr != NULL);
     offset = (char*) p_arena->top_ptr - (char*) p_arena->current_block->mem;
     old_amount = p_arena->current_block_used - offset;
     if (new_amount <= old_amount) return p_arena->top_ptr;
@@ -110,6 +111,10 @@ void arena_reset(struct Arena *p_arena) {
         p_block = p_prev_block;
         p_prev_block = p_block->prev_block;
     }
+    p_arena->current_block = p_block;
+    p_arena->current_block_used = p_arena->default_block_size;
+    p_arena->current_block_used = 0;
+    p_arena->top_ptr = NULL;
 }
 
 void arena_clear(struct Arena *p_arena) {
