@@ -79,7 +79,7 @@ void *arena_realloc(struct Arena *p_arena, void *ptr, ptrdiff_t old_amount, ptrd
     else
         /* Grow in same block, as it's at top */
         p_arena->current_block_used += new_amount - old_amount;
-    return ptr;
+    return p_arena->top_ptr;
 }
 
 /* no ptr param, as it's known at top */
