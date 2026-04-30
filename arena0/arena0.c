@@ -112,7 +112,7 @@ void arena_reset(struct Arena *p_arena) {
         p_prev_block = p_block->prev_block;
     }
     p_arena->current_block = p_block;
-    p_arena->current_block_used = p_arena->default_block_size;
+    p_arena->current_block_size = p_arena->default_block_size;
     p_arena->current_block_used = 0;
     p_arena->top_ptr = NULL;
 }
