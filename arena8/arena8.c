@@ -42,9 +42,9 @@ void arena_init(struct Arena *restrict p_arena, size_t default_block_capacity) {
 
 /* Required memory alignment otherwise undefined behavior from misaligned access */
 /* 'align' is a pow of 2 */
-void *arena_align_alloc(struct Arena *p_arena, ptrdiff_t amount, ptrdiff_t align) {
+void *arena_alloc(struct Arena *p_arena, ptrdiff_t amount) {
     assert(amount > 0 && align >= 0);
-    assert(IS_ALIGNED_2(align));
+    
     // assert(((size_t) (amount) & ((size_t) (align) - 1)) == 0); /* is amount aligned itself */
 
     /* Blocks may not fully be used up */
