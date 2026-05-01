@@ -10,6 +10,7 @@
 
 struct Block {
     struct Block *prev_block;
+    // ensure this is aligned to 8 bytes
     char mem[];
 };
 
