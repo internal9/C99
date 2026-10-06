@@ -97,6 +97,11 @@ static inline int esc_seq_from_char(char c)
         }
 }
 
+static inline void __error_at(void)
+{
+   
+}
+
 // support octal integers?
 static void lex_bin_int(struct Tk *p_tk)
 {
